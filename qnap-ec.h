@@ -14,3 +14,31 @@
  * http://www.gnu.org/copyleft/gpl.html or write to The Free Software Foundation, 675 Mass Ave,
  * Cambridge, MA 02139, USA.
  */
+
+// Define the I/O control enums
+enum qnap_ec_ioctl_call_func_functions {
+  ec_sys_get_fan_status,
+  ec_sys_get_fan_speed,
+  ec_sys_get_fan_pwm,
+  ec_sys_get_temperature,
+  ec_sys_set_fan_speed
+};
+
+// Define the I/O control data structures
+struct qnap_ec_ioctl_call_func_data {
+  enum qnap_ec_ioctl_call_func_functions function;
+  uint32_t argument1;
+  uint32_t argument2;
+};
+struct qnap_ec_ioctl_return_data {
+  uint32_t value;
+};
+struct qnap_ec_ioctl_data {
+  struct qnap_ec_ioctl_call_func_data call_func_data;
+  struct qnap_ec_ioctl_return_data return_data;
+};
+
+// Define I/O control commands
+// Note: 0x01 is the first IOCtl number not used according to the kernel documentation
+#define QNAP_EC_IOCTL_CALL_FUNC _IOR(0x01, 0x01, struct qnap_ec_ioctl_call_func_data)
+#define QNAP_EC_IOCTL_RETURN _IOW(0x01, 0x02, struct qnap_ec_ioctl_return_data)
