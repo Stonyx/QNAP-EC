@@ -189,20 +189,16 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   struct device* device;
   int error;
 
-  // Allocate memory for the custom data and associate with the platform device
-  ioctl_data = devm_kzalloc(&platform_dev->dev, sizeof(struct qnap_ec_ioctl_data),
-    GFP_KERNEL);
+  // Allocate memory for the ioctl data and associate with the platform device
+  ioctl_data = devm_kzalloc(&platform_dev->dev, sizeof(*ioctl_data), GFP_KERNEL);
   if (ioctl_data == NULL)
   {
     return -ENOMEM;
   }
 
-  // Add the custom data to the platform device
-  platform_set_drvdata(platform_dev, ioctl_data);
-
   // Register the platform device
   // Note: name matches the platform driver name which doesn't allow dashes
-  device = devm_hwmon_device_register_with_info(&platform_dev->dev, "qnap_ec", NULL,
+  device = devm_hwmon_device_register_with_info(&platform_dev->dev, "qnap_ec", ioctl_data,
     &qnap_ec_hwmon_chip_info, NULL);
   if (device == NULL)
   {
@@ -223,7 +219,6 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
 }
 
 // Function called to add the character device
-// TODO: Check if character devices shows up in /dev without creating class and device
 static int qnap_ec_add_char_dev(struct qnap_ec_ioctl_data* ioctl_data)
 {
   // Declare and/or define needed variables
@@ -276,7 +271,7 @@ static int qnap_ec_add_char_dev(struct qnap_ec_ioctl_data* ioctl_data)
   }
 
   // Create the character device
-  device = device_create(qnap_ec_char_dev_class, NULL, qnap_ec_char_dev_major_minor, NULL,
+  device = device_create(qnap_ec_char_dev_class, NULL, qnap_ec_char_dev_major_minor, ioctl_data,
     "qnap-ec");
   if (device == NULL)
   {
@@ -291,9 +286,6 @@ static int qnap_ec_add_char_dev(struct qnap_ec_ioctl_data* ioctl_data)
 
     return -ENOMEM;
   }
-
-  // Add the custom data to the character device
-  dev_set_drvdata(device, ioctl_data);
 
   return 0;
 }
@@ -345,7 +337,7 @@ static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, 
                              int channel, long* value)
 {
   // Declare and/or define needed variables
-  struct qnap_ec_ioctl_data* ioctl_data;
+  struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(dev);
 
   printk(KERN_INFO "qnap_ec_hwmon_read - %i - %i - %i", type, attribute, channel);
 
@@ -360,31 +352,18 @@ static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, 
           // Get the helper mutex lock
           mutex_lock(&qnap_ec_helper_mutex);
 
-          // TEST ... DELETE
-          if (ioctl_data == NULL)
-          {
-            printk(KERN_INFO "qnap_ec_hwmon_read - platform_dev_data = NULL");
-            mutex_unlock(&qnap_ec_helper_mutex);
-            return -1;
-          }
-
-          // Set the device data fields to call the correct function
+          // Set the ioctl data fields to call the correct function with the right arguments
           ioctl_data->call_func_data.function = ec_sys_get_fan_speed;
           ioctl_data->call_func_data.argument1 = channel;
-
-          printk(KERN_INFO "qnap_ec_hwmon_read - spot 1");
 
           // Call the helper program
           qnap_ec_call_helper();
 
-          printk(KERN_INFO "qnap_ec_hwmon_read - spot 2");
-
-          // Get the data ...
+          // Set the value to the return data value
+          *value = ioctl_data->return_data.value;
 
           // Release the helper mutex lock
           mutex_unlock(&qnap_ec_helper_mutex);
-
-          printk(KERN_INFO "qnap_ec_hwmon_read - spot 3");
 
           return 0;
         default:
