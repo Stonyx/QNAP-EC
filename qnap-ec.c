@@ -357,7 +357,13 @@ static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, 
           ioctl_data->call_func_data.argument1 = channel;
 
           // Call the helper program
-          qnap_ec_call_helper();
+          if (qnap_ec_call_helper() != 0)
+          {
+            // Release the helper mutex lock
+            mutex_unlock(&qnap_ec_helper_mutex);
+
+            return -1;
+          }
 
           // Set the value to the return data value
           *value = ioctl_data->return_data.value;
@@ -424,7 +430,8 @@ static uint16_t qnap_ec_call_helper()
   int return_value;
   char* arguments[] = {
     "/usr/local/bin/qnap-ec-helper",
-    NULL };
+    NULL 
+  };
   char* environment[] = {
     "PATH=/usr/local/sbin;/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin",
     NULL
@@ -458,6 +465,8 @@ static uint16_t qnap_ec_call_helper()
 // Function called when the character device is openeded
 static int qnap_ec_char_dev_open(struct inode* inode, struct file* file)
 {
+  printk(KERN_INFO "qnap_ec_char_dev_open");
+
   // Check if the helper mutex is currently unlocked which means we are not expecting any
   //   communications
   if (mutex_is_locked(&qnap_ec_helper_mutex) == 0)
@@ -484,6 +493,8 @@ static long int qnap_ec_char_dev_ioctl(struct file* file, unsigned int command,
 {
   // Declare and/or define needed variables
   struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(file->private_data);
+
+  printk(KERN_INFO "qnap_ec_char_dev_ioctl - %i", command);
 
   // Swtich based on the command
   switch (command)
@@ -526,6 +537,8 @@ static long int qnap_ec_char_dev_ioctl(struct file* file, unsigned int command,
 // Function called when the character device is released
 static int qnap_ec_char_dev_release(struct inode* inode, struct file* file)
 {
+  printk(KERN_INFO "qnap_ec_char_dev_release");
+
   // Release the character device mutex lock
   mutex_unlock(&qnap_ec_char_dev_mutex);
 
