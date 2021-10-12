@@ -22,19 +22,29 @@
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
+#include <linux/types.h>
 #include "qnap-ec.h"
 
 // Define constants
 #define QNAP_EC_ID_PORT_1 0x2E
 #define QNAP_EC_ID_PORT_2 0x2F
-#define QNAP_EC_COMM_PORT_1 0x68
-#define QNAP_EC_COMM_PORT_2 0x6C
 
 // Specify module details
 MODULE_DESCRIPTION("QNAP EC Driver");
 MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("platform:qnap-ec");
+
+// Define the mutexes
+DEFINE_MUTEX(qnap_ec_helper_mutex);
+DEFINE_MUTEX(qnap_ec_char_dev_mutex);
+
+// Define I/O control data structure
+struct qnap_ec_ioctl_data {
+  struct qnap_ec_ioctl_call_func_data call_func_data;
+  struct qnap_ec_ioctl_return_data return_data;
+  atomic_t open_device;
+};
 
 // Declare functions
 static int __init qnap_ec_init(void);
@@ -47,23 +57,19 @@ static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, 
                               int channel, long* value);
 static int qnap_ec_hwmon_write(struct device* dev, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value);
-static uint16_t qnap_ec_call_helper(void);
+static int qnap_ec_call_helper(void);
 static int qnap_ec_char_dev_open(struct inode* inode, struct file* file);
 static long int qnap_ec_char_dev_ioctl(struct file* file, unsigned int command,
                                        unsigned long argument);
 static int qnap_ec_char_dev_release(struct inode* inode, struct file* file);
 static int qnap_ec_remove(struct platform_device* platform_dev);
-static void __exit qnap_ec_remove_char_device(void);
+static void __exit qnap_ec_remove_char_dev(void);
 static void __exit qnap_ec_exit(void);
 
 // Declare and/or define needed variables for overriding the detected device ID
 static unsigned short qnap_ec_force_id;
 module_param(qnap_ec_force_id, ushort, 0);
 MODULE_PARM_DESC(qnap_ec_force_id, "Override the detected device ID");
-
-// Define the mutexes
-DEFINE_MUTEX(qnap_ec_helper_mutex);
-DEFINE_MUTEX(qnap_ec_char_dev_mutex);
 
 // Specifiy the init function
 module_init(qnap_ec_init);
@@ -350,11 +356,14 @@ static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, 
       {
         case hwmon_fan_input:
           // Get the helper mutex lock
-          mutex_lock(&qnap_ec_helper_mutex);
+          //mutex_lock(&qnap_ec_helper_mutex);
 
           // Set the ioctl data fields to call the correct function with the right arguments
           ioctl_data->call_func_data.function = ec_sys_get_fan_speed;
           ioctl_data->call_func_data.argument1 = channel;
+
+          // Set the open device flag to allow communication
+          atomic_set(&ioctl_data->open_device, 1);
 
           // Call the helper program
           if (qnap_ec_call_helper() != 0)
@@ -365,11 +374,14 @@ static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, 
             return -1;
           }
 
+          // Clear the open device flag
+          atomic_set(&ioctl_data->open_device, 0);
+
           // Set the value to the return data value
           *value = ioctl_data->return_data.value;
 
           // Release the helper mutex lock
-          mutex_unlock(&qnap_ec_helper_mutex);
+          //mutex_unlock(&qnap_ec_helper_mutex);
 
           return 0;
         default:
@@ -424,7 +436,7 @@ static int qnap_ec_hwmon_write(struct device* dev, enum hwmon_sensor_types type,
 // Note: the return value contains the call_usermodehelper error code (if any) in the first
 //       8 bytes of the return value and the user space helper program error code (if any)
 //       in the next 8 bytes
-static uint16_t qnap_ec_call_helper()
+static int qnap_ec_call_helper()
 {
   // Declare and/or define needed variables
   int return_value;
@@ -465,24 +477,28 @@ static uint16_t qnap_ec_call_helper()
 // Function called when the character device is openeded
 static int qnap_ec_char_dev_open(struct inode* inode, struct file* file)
 {
+  // Declare and/or define needed variables
+  struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(file->private_data);
+
   printk(KERN_INFO "qnap_ec_char_dev_open");
 
-  // Check if the helper mutex is currently unlocked which means we are not expecting any
-  //   communications
-  if (mutex_is_locked(&qnap_ec_helper_mutex) == 0)
+  // Check if the open device flag is not set which means we are not expecting any communications
+  if (atomic_read(&ioctl_data->open_device) == 0)
   {
     return -EBUSY;
   }
 
-  // Check if the character device mutex is currently locked which means we are already
-  //   communicating and this is an unexpected communication
-  if (mutex_is_locked(&qnap_ec_char_dev_mutex) == 1)
+  printk(KERN_INFO "qnap_ec_char_dev_open - #1");
+
+  // Try to lock the character device mutex if it's currently unlocked
+  // Note: if the mutex is currently locked it means we are already communicating and this is an
+  //       unexpected communication
+  if (mutex_trylock(&qnap_ec_char_dev_mutex) == 0)
   {
     return -EBUSY;
   }
 
-  // Get the character device mutex lock
-  mutex_lock(&qnap_ec_char_dev_mutex);
+  printk(KERN_INFO "qnap_ec_char_dev_open - #2");
 
   return 0;
 }
@@ -549,13 +565,13 @@ static int qnap_ec_char_dev_release(struct inode* inode, struct file* file)
 static int qnap_ec_remove(struct platform_device* platform_dev)
 {
   // Remove the character device
-  qnap_ec_remove_char_device();
+  qnap_ec_remove_char_dev();
 
   return 0;
 }
 
 // Function called to remove the character device
-static void qnap_ec_remove_char_device(void)
+static void qnap_ec_remove_char_dev(void)
 {
   // Destory the character device
   device_destroy(qnap_ec_char_dev_class, qnap_ec_char_dev_major_minor);

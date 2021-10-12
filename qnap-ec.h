@@ -33,10 +33,6 @@ struct qnap_ec_ioctl_call_func_data {
 struct qnap_ec_ioctl_return_data {
   uint32_t value;
 };
-struct qnap_ec_ioctl_data {
-  struct qnap_ec_ioctl_call_func_data call_func_data;
-  struct qnap_ec_ioctl_return_data return_data;
-};
 
 // Define I/O control commands
 // Note: 0x01 is the first IOCtl number not used according to the kernel documentation

@@ -15,42 +15,38 @@
  * Cambridge, MA 02139, USA.
  */
 
-#include <argp.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <unistd.h>
+#include <sys/ioctl.h>
+#include "qnap-ec.h"
 
 // Define fan, pwm, and temperature sensor ID arrays
 // Note: IDs are based on the switch statements in the it8528_get_fan_speed, it8528_get_fan_pwm, and
 //       it8528_get_temperature functions in the libuLinux_hal.so library as decompiled by IDA
-static const uint8_t uqnap_ec_fan_ids[] = { 5, 7, 10, 11, 25, 35 };
+static const uint8_t qnap_ec_fan_ids[] = { 5, 7, 10, 11, 25, 35 };
 static const uint8_t qnap_ec_pwm_ids[] = { 5, 7, 25, 35 };
 static const uint8_t qnap_ec_temp_ids[] = { 1, 7, 10, 11, 38 };
-
-// Define program details
-static const char program_version[] = "qnap-ec-helper 0.1";
-static const char program_contact[] = "<info@stonyx.com>";
-static const char program_description[] = "QNAP-EC - Retrieve and set data on QNAP embedded controllers";
-static const char program_required_args[] = "ARG1 ARG2";
-
-// Function called to parse an option
-static error_t parse_option(int key, char* argument, struct argp_state* state)
-{
-  // Get the input argument from the state
-  struct arguments* arguments = state->input;
-
-  return 0;
-}
-
-static struct argp_option options[] = {
-  {"fan", 'f', "FAN_ID", 0, "ID of fan to retrieve data for" },
-  {"pwm", 'p', "PWM_ID", 0, "ID of PWM to retrieve or set data for" },
-  {"temp", 't', "TEMPERATURE_SENSOR_ID", 0, "ID of temperature sensor to retrieve data for" },
-  {"set", 's', "VALUE", 0, "Value to set data to" },
-  { 0 }
-};
 
 // Function called as main entry point
 int main(int argc, char** argv)
 {
+  // Declare needed variables
+  int device;
+  struct qnap_ec_ioctl_call_func_data ioctl_call_func_data;
+
+  // Open the qnap-ec device
+  device = open("/dev/qnap-ec", O_RDWR);
+  if (device < 0)
+  {
+    return -1;
+  }
+
+  ioctl(device, QNAP_EC_IOCTL_CALL_FUNC, (int32_t*)&ioctl_call_func_data);
+
+  // Close the qnap-ec device
+  close(device);
+
   return 0;
 }
