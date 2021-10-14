@@ -17,6 +17,7 @@
 
 #include <fcntl.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -35,18 +36,43 @@ int main(int argc, char** argv)
   // Declare needed variables
   int device;
   struct qnap_ec_ioctl_call_func_data ioctl_call_func_data;
+  struct qnap_ec_ioctl_return_data ioctl_return_data;
 
   // Open the qnap-ec device
   device = open("/dev/qnap-ec", O_RDWR);
   if (device < 0)
   {
-    return -1;
+    exit(EXIT_FAILURE);
   }
 
+  // Make a I/O control call to the device to find out which function in the library needs to be
+  //   called
   ioctl(device, QNAP_EC_IOCTL_CALL_FUNC, (int32_t*)&ioctl_call_func_data);
+
+  // Switch based on the function
+  switch (ioctl_call_func_data.function)
+  {
+    case ec_sys_get_fan_status:
+      break;
+    case ec_sys_get_fan_speed:
+      // Call the library function
+
+      // Make the I/O control call to the device to return the data
+      ioctl(device, QNAP_EC_IOCTL_RETURN, (int32_t*)&ioctl_return_data);
+
+      break;
+    case ec_sys_get_fan_pwm:
+      break;
+    case ec_sys_get_temperature:
+      break;
+    case ec_sys_set_fan_speed:
+      break;
+    default:
+      break;
+  }
 
   // Close the qnap-ec device
   close(device);
 
-  return 0;
+  exit(EXIT_SUCCESS);
 }

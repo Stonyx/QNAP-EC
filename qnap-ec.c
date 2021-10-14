@@ -48,13 +48,10 @@ static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, 
 static int qnap_ec_hwmon_write(struct device* dev, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value);
 static int qnap_ec_call_helper(void);
-static int qnap_ec_misc_dev_open(struct inode* inode, struct file* file);
-static long int qnap_ec_misc_dev_ioctl(struct file* file, unsigned int command,
-                                       unsigned long argument);
-static int qnap_ec_misc_dev_release(struct inode* inode, struct file* file);
-static void qnap_ec_plat_device_release(struct device *device);
-static int qnap_ec_remove(struct platform_device* platform_dev);
-static void __exit qnap_ec_remove_char_dev(void);
+static int qnap_ec_misc_device_open(struct inode* inode, struct file* file);
+static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int command,
+                                          unsigned long argument);
+static int qnap_ec_misc_device_release(struct inode* inode, struct file* file);
 static void __exit qnap_ec_exit(void);
 
 // Declare and/or define needed variables for overriding the detected device ID
@@ -64,20 +61,24 @@ MODULE_PARM_DESC(qnap_ec_force_id, "Override the detected device ID");
 
 // Define I/O control data structure
 struct qnap_ec_ioctl_data {
+  uint8_t open_device;
   struct qnap_ec_ioctl_call_func_data call_func_data;
   struct qnap_ec_ioctl_return_data return_data;
-  atomic_t open_device;
 };
 
 // Define the devices structure
+// Note: in order to use the platform_device_alloc function (see note in the qnap_ec_init 
+//       function) we need to make the plat_device member a pointer and in order to use the
+//       container_of macro in the qnap_ec_misc_dev_open and qnap_ec_misc_dev_ioctl functions
+//       we need to make the misc_device member not a pointer
 struct qnap_ec_devices {
-  struct platform_device plat_device;
+  struct platform_device* plat_device;
   struct miscdevice misc_device;
 };
 
 // Define the mutexes
 DEFINE_MUTEX(qnap_ec_helper_mutex);
-DEFINE_MUTEX(qnap_ec_char_dev_mutex);
+DEFINE_MUTEX(qnap_ec_misc_device_mutex);
 
 // Specifiy the init and exit functions
 module_init(qnap_ec_init);
@@ -98,9 +99,9 @@ static int __init qnap_ec_init(void)
   // Define static constant data consisting of the miscellaneous driver file operations structure
   static const struct file_operations misc_device_file_ops = {
     .owner = THIS_MODULE,
-    .open = &qnap_ec_misc_dev_open,
-    .unlocked_ioctl = &qnap_ec_misc_dev_ioctl,
-    .release = &qnap_ec_misc_dev_release
+    .open = &qnap_ec_misc_device_open,
+    .unlocked_ioctl = &qnap_ec_misc_device_ioctl,
+    .release = &qnap_ec_misc_device_release
   };
 
   // Check if we can't find the chip
@@ -142,15 +143,35 @@ static int __init qnap_ec_init(void)
     return -ENOMEM;
   }
 
-  // Populate various platform device structure fields
-  qnap_ec_devices->plat_device.name = "qnap_ec"; // Name matches the platform driver name
-  qnap_ec_devices->plat_device.id = PLATFORM_DEVID_NONE;
-  qnap_ec_devices->plat_device.dev.release = &qnap_ec_plat_device_release;
+  // Allocate memory for the platform device structure and populate various fields
+  // Note: we are using the platform_device_alloc function in combination with the
+  //       platform_device_add function instead of the platform_device_register function because
+  //       this approach is recommended for legacy type drivers that use hardware probing, all
+  //       other hwmon drivers use this approach, and it provides a device release function for us
+  qnap_ec_devices->plat_device = platform_device_alloc("qnap_ec", 0);
+  if (qnap_ec_devices->plat_device == NULL)
+  {
+    // Free the devices structure memory
+    kfree(qnap_ec_devices);
 
-  // Register the platform device
-  error = platform_device_register(&qnap_ec_devices->plat_device);
+    // Unregister the driver
+    platform_driver_unregister(qnap_ec_plat_driver);
+
+    // Free the platform driver structure memory
+    kfree(qnap_ec_plat_driver);
+
+    return -ENOMEM;
+  }
+  qnap_ec_devices->plat_device->name = "qnap_ec"; // The name matches the platform driver name
+  qnap_ec_devices->plat_device->id = PLATFORM_DEVID_NONE;
+
+  // "Register" the platform device
+  error = platform_device_add(qnap_ec_devices->plat_device);
   if (error)
   {
+    // Free the platform device structure memory
+    platform_device_put(qnap_ec_devices->plat_device);
+
     // Free the devices structure memory
     kfree(qnap_ec_devices);
 
@@ -172,8 +193,8 @@ static int __init qnap_ec_init(void)
   error = misc_register(&qnap_ec_devices->misc_device);
   if (error)
   {
-    // Unregister the platform device
-    platform_device_unregister(&qnap_ec_devices->plat_device);
+    // "Unregister" the platform device and free the platform device structure memory
+    platform_device_put(qnap_ec_devices->plat_device);
 
     // Free the devices structure memory
     kfree(qnap_ec_devices);
@@ -244,7 +265,7 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   }
 
   // Register the hwmon device and include the ioctl data structure
-  // Note: name matches the platform driver name which doesn't allow dashes
+  // Note: the name matches the platform driver name which doesn't allow dashes
   device = devm_hwmon_device_register_with_info(&platform_dev->dev, "qnap_ec", ioctl_data,
     &hwmon_chip_info, NULL);
   if (device == NULL)
@@ -261,8 +282,6 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
 static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_types type,
                                         u32 attribute, int channel)
 {
-  printk(KERN_INFO "qnap_ec_is_visible - %i - %i - %i", type, attribute, channel);
- 
   // Switch based on the sensor type
   switch (type)
   {
@@ -307,8 +326,6 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   // Declare and/or define needed variables
   struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(device);
 
-  printk(KERN_INFO "qnap_ec_hwmon_read - %i - %i - %i", type, attribute, channel);
-
   // Switch based on the sensor type
   switch (type)
   {
@@ -318,32 +335,32 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_fan_input:
           // Get the helper mutex lock
-          // mutex_lock(&qnap_ec_helper_mutex);
+          mutex_lock(&qnap_ec_helper_mutex);
 
           // Set the ioctl data fields to call the correct function with the right arguments
           ioctl_data->call_func_data.function = ec_sys_get_fan_speed;
           ioctl_data->call_func_data.argument1 = channel;
 
           // Set the open device flag to allow communication
-          atomic_set(&ioctl_data->open_device, 1);
+          ioctl_data->open_device = 1;
 
           // Call the helper program
           if (qnap_ec_call_helper() != 0)
           {
             // Release the helper mutex lock
-            // mutex_unlock(&qnap_ec_helper_mutex);
+            mutex_unlock(&qnap_ec_helper_mutex);
 
             return -1;
           }
 
           // Clear the open device flag
-          atomic_set(&ioctl_data->open_device, 0);
+          ioctl_data->open_device = 0;
 
           // Set the value to the return data value
           *value = ioctl_data->return_data.value;
 
           // Release the helper mutex lock
-          // mutex_unlock(&qnap_ec_helper_mutex);
+          mutex_unlock(&qnap_ec_helper_mutex);
 
           return 0;
         default:
@@ -375,8 +392,6 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
 static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value)
 {
-  printk(KERN_INFO "qnap_ec_write - %i - %i - %i", type, attribute, channel);
-
   // Switch based on the sensor type
   switch (type)
   {
@@ -437,17 +452,18 @@ static int qnap_ec_call_helper()
 }
 
 // Function called when the miscellaneous device is openeded
-static int qnap_ec_misc_dev_open(struct inode* inode, struct file* file)
+static int qnap_ec_misc_device_open(struct inode* inode, struct file* file)
 {
   // Declare and/or define needed variables
-  struct qnap_ec_devices* devices = container_of(file->private_data, struct qnap_ec_devices,
-    misc_device);
-  struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(&devices->plat_device.dev);
-
-  printk(KERN_INFO "qnap_ec_misc_dev_open");
+  // Note: the following statement is a combination of the following two statements
+  //       struct qnap_ec_devices* devices = container_of(file->private_data,
+  //         struct qnap_ec_devices, misc_device);
+  //       struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(&devices->plat_device->dev);
+  struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(&container_of(file->private_data,
+    struct qnap_ec_devices, misc_device)->plat_device->dev);
 
   // Check if the open device flag is not set which means we are not expecting any communications
-  if (atomic_read(&ioctl_data->open_device) == 0)
+  if (ioctl_data->open_device == 0)
   {
     return -EBUSY;
   }
@@ -455,7 +471,7 @@ static int qnap_ec_misc_dev_open(struct inode* inode, struct file* file)
   // Try to lock the character device mutex if it's currently unlocked
   // Note: if the mutex is currently locked it means we are already communicating and this is an
   //       unexpected communication
-  if (mutex_trylock(&qnap_ec_char_dev_mutex) == 0)
+  if (mutex_trylock(&qnap_ec_misc_device_mutex) == 0)
   {
     return -EBUSY;
   }
@@ -464,14 +480,16 @@ static int qnap_ec_misc_dev_open(struct inode* inode, struct file* file)
 }
 
 // Function called when the miscellaneous device receives a I/O control command
-static long int qnap_ec_misc_dev_ioctl(struct file* file, unsigned int command,
-                                       unsigned long argument)
+static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int command,
+                                          unsigned long argument)
 {
-  printk(KERN_INFO "qnap_ec_misc_dev_ioctl - %i", command);
-
-  /*
   // Declare and/or define needed variables
-  struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(file->private_data);
+  // Note: the following statement is a combination of the following two statements
+  //       struct qnap_ec_devices* devices = container_of(file->private_data,
+  //         struct qnap_ec_devices, misc_device);
+  //       struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(&devices->plat_device->dev);
+  struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(&container_of(file->private_data,
+    struct qnap_ec_devices, misc_device)->plat_device->dev);
 
   // Swtich based on the command
   switch (command)
@@ -483,9 +501,9 @@ static long int qnap_ec_misc_dev_ioctl(struct file* file, unsigned int command,
         return -EFAULT;
       }
 
-      // Copy the data from the platform data structure to the user space
+      // Copy the data from the ioctl data structure to the user space
       if (copy_to_user((int32_t*)argument, &ioctl_data->call_func_data,
-        sizeof(struct qnap_ec_ioctl_call_func_data) != 0))
+        sizeof(struct qnap_ec_ioctl_call_func_data)) != 0)
       {
         return -EFAULT;
       }
@@ -498,9 +516,9 @@ static long int qnap_ec_misc_dev_ioctl(struct file* file, unsigned int command,
         return -EFAULT;
       }
 
-      // Copy the data from the user space to the platform data structure
+      // Copy the data from the user space to the ioctl data structure
       if (copy_from_user(&ioctl_data->return_data, (int32_t*)argument,
-        sizeof(struct qnap_ec_ioctl_return_data) != 0))
+        sizeof(struct qnap_ec_ioctl_return_data)) != 0)
       {
         return -EFAULT;
       }
@@ -509,41 +527,17 @@ static long int qnap_ec_misc_dev_ioctl(struct file* file, unsigned int command,
     default:
       return -EINVAL;
   }
-  */
 
   return 0;
 }
 
 // Function called when the miscellaneous device is released
-static int qnap_ec_misc_dev_release(struct inode* inode, struct file* file)
+static int qnap_ec_misc_device_release(struct inode* inode, struct file* file)
 {
-  printk(KERN_INFO "qnap_ec_misc_dev_release");
-
   // Release the character device mutex lock
-  mutex_unlock(&qnap_ec_char_dev_mutex);
+  mutex_unlock(&qnap_ec_misc_device_mutex);
 
   return 0;
-}
-
-// Function called when the device is release
-// Note: since we are using the platform_device_register function instead of a combination of the
-//       platform_device_allow and platform_device_add functions in our init function we need to
-//       create a device release function of our own and are using an exact duplicate (with the
-//       exception of variable names) of the static platform_device_release function as defined in
-//       the linux/drivers/base/platform.c file
-static void qnap_ec_plat_device_release(struct device *device)
-{
-  /*
-  struct platform_object* plat_object = container_of(device, struct platform_object,
-    qnap_ec_devices->plat_device->dev);
-
-  of_node_put(plat_object->pdev.dev.of_node);
-  kfree(plat_object->pdev.dev.platform_data);
-  kfree(plat_object->pdev.mfd_cell);
-  kfree(plat_object->pdev.resource);
-  kfree(plat_object->pdev.driver_override);
-  kfree(plat_object);
-  */
 }
 
 // Function called to exit the driver
@@ -552,8 +546,11 @@ static void __exit qnap_ec_exit(void)
   // Unregister the miscellaneous device
   misc_deregister(&qnap_ec_devices->misc_device);
 
-  // Unregister the platform device
-  platform_device_unregister(&qnap_ec_devices->plat_device);
+  // Unregister the platform device and free the platform device structure memory
+  // Note: we are using the platform_device_unregister function instead of the platform_device_put
+  //       function used in the qnap_ec_init function because all other hwmon drivers take this
+  //       approach
+  platform_device_unregister(qnap_ec_devices->plat_device);
 
   // Free the devices structure memory
   kfree(qnap_ec_devices);
