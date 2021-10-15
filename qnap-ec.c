@@ -351,7 +351,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           ioctl_data->ioctl_command.function_type = int64_func_int_uint32pointer;
           strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_fan_speed",
             sizeof(ioctl_data->ioctl_command.function_name) - 1);
-          ioctl_data->ioctl_command.argument1_int = fan_ids[channel - 1];
+          ioctl_data->ioctl_command.argument1_int = fan_ids[channel];
           ioctl_data->ioctl_command.argument2_uint32 = 0;
 
           break;
@@ -368,7 +368,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           ioctl_data->ioctl_command.function_type = int64_func_int_uint32pointer;
           strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
             sizeof(ioctl_data->ioctl_command.function_name) - 1);
-          ioctl_data->ioctl_command.argument1_int = pwm_ids[channel - 1];
+          ioctl_data->ioctl_command.argument1_int = pwm_ids[channel];
           ioctl_data->ioctl_command.argument2_uint32 = 0;
 
           break;
@@ -387,7 +387,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           ioctl_data->ioctl_command.function_type = int64_func_int_doublepointer;
           strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_temperature",
             sizeof(ioctl_data->ioctl_command.function_name) - 1);
-          ioctl_data->ioctl_command.argument1_int = temp_ids[channel - 1];
+          ioctl_data->ioctl_command.argument1_int = temp_ids[channel];
           ioctl_data->ioctl_command.argument2_int64 = 0;
 
           break;
