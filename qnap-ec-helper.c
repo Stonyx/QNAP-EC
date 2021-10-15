@@ -15,64 +15,163 @@
  * Cambridge, MA 02139, USA.
  */
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <syslog.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include "qnap-ec.h"
-
-// Define fan, pwm, and temperature sensor ID arrays
-// Note: IDs are based on the switch statements in the it8528_get_fan_speed, it8528_get_fan_pwm, and
-//       it8528_get_temperature functions in the libuLinux_hal.so library as decompiled by IDA
-static const uint8_t qnap_ec_fan_ids[] = { 5, 7, 10, 11, 25, 35 };
-static const uint8_t qnap_ec_pwm_ids[] = { 5, 7, 25, 35 };
-static const uint8_t qnap_ec_temp_ids[] = { 1, 7, 10, 11, 38 };
+#include "qnap-ec-ioctl.h"
 
 // Function called as main entry point
 int main(int argc, char** argv)
 {
   // Declare needed variables
   int device;
-  struct qnap_ec_ioctl_call_func_data ioctl_call_func_data;
-  struct qnap_ec_ioctl_return_data ioctl_return_data;
+  void* library;
+  struct qnap_ec_ioctl_command ioctl_command;
+  int64_t (*int64_function_int_uint32pointer)(int, uint32_t*);
+  int64_t (*int64_function_int_doublepointer)(int, double*);
+  int64_t (*int64_function_int_int)(int, int);
+  double double_value;
+
+  // Open the system log
+  openlog("qnap-ec-helper", LOG_PID, LOG_USER);
 
   // Open the qnap-ec device
   device = open("/dev/qnap-ec", O_RDWR);
   if (device < 0)
   {
+    syslog(LOG_ERR, "unable to open /dev/qnap-ec device");
+    closelog();
     exit(EXIT_FAILURE);
   }
 
   // Make a I/O control call to the device to find out which function in the library needs to be
   //   called
-  ioctl(device, QNAP_EC_IOCTL_CALL_FUNC, (int32_t*)&ioctl_call_func_data);
-
-  // Switch based on the function
-  switch (ioctl_call_func_data.function)
+  if (ioctl(device, QNAP_EC_IOCTL_CALL, (int32_t*)&ioctl_command) != 0)
   {
-    case ec_sys_get_fan_status:
-      break;
-    case ec_sys_get_fan_speed:
+    syslog(LOG_ERR, "error");
+    close(device);
+    closelog();
+    exit(EXIT_FAILURE);
+  }
+
+  // Open the libuLinux_hal library
+  library = dlopen("/usr/local/lib/libuLinux_hal.so", RTLD_LAZY);
+  if (library == NULL)
+  {
+    // Open the libuLinux_hal library by name only and rely on the path to resolve its path
+    library = dlopen("libuLinux_hal.so", RTLD_LAZY);
+    if (library == NULL)
+    {
+      syslog(LOG_ERR, "libuLinux_hal library not found in the expected path (/usr/local/lib) or "
+        "any of the paths searched in by the dynamic linker");
+      close(device);
+      closelog();
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  // Switch based on the function type
+  switch (ioctl_command.function_type)
+  {
+    case int64_func_int_uint32pointer:
+      // Clear any previous dynamic link errors
+      dlerror();
+
+      // Get a pointer to the function
+      int64_function_int_uint32pointer = dlsym(library, ioctl_command.function_name);
+      if (dlerror() != NULL)
+      {
+        syslog(LOG_ERR, "error");
+        dlclose(library);
+        close(device);
+        closelog();
+        exit(EXIT_FAILURE);
+      }
+
       // Call the library function
+      ioctl_command.return_value_int64 = int64_function_int_uint32pointer(ioctl_command.
+        argument1_int, &ioctl_command.argument2_uint32);
 
-      // Make the I/O control call to the device to return the data
-      ioctl(device, QNAP_EC_IOCTL_RETURN, (int32_t*)&ioctl_return_data);
+      break;
+    case int64_func_int_doublepointer:
+      // Clear any previous dynamic link errors
+      dlerror();
+
+      // Get a pointer to the function
+      int64_function_int_doublepointer = dlsym(library, ioctl_command.function_name);
+      if (dlerror() != NULL)
+      {
+        syslog(LOG_ERR, "error");
+        dlclose(library);
+        close(device);
+        closelog();
+        exit(EXIT_FAILURE);
+      }
+
+      // Cast the int64 field to a double value
+      // Note: we are using an int64 field instead of a double field because floating point math
+      //       is not possible in kernel space
+      double_value = (double)ioctl_command.argument2_int64;
+
+      // Call the library function
+      ioctl_command.return_value_int64 = int64_function_int_doublepointer(ioctl_command.
+        argument1_int, &double_value);
+
+      // Round and cast the double value back to the int64 field
+      ioctl_command.argument2_int64 = (int64_t)(double_value + 0.5);
 
       break;
-    case ec_sys_get_fan_pwm:
-      break;
-    case ec_sys_get_temperature:
-      break;
-    case ec_sys_set_fan_speed:
+    case int64_func_int_int:
+      // Clear any previous dynamic link errors
+      dlerror();
+
+      // Get a pointer to the function
+      int64_function_int_int = dlsym(library, ioctl_command.function_name);
+      if (dlerror() != NULL)
+      {
+        syslog(LOG_ERR, "error");
+        dlclose(library);
+        close(device);
+        closelog();
+        exit(EXIT_FAILURE);
+      }
+
+      // Call the library function
+      ioctl_command.return_value_int64 = int64_function_int_int(ioctl_command.argument1_int,
+        ioctl_command.argument2_int);
+
       break;
     default:
-      break;
+      syslog(LOG_ERR, "error");
+      dlclose(library);
+      close(device);
+      closelog();
+      exit(EXIT_FAILURE);
   }
+
+  // Make the I/O control call to the device to return the data
+  if (ioctl(device, QNAP_EC_IOCTL_RETURN, (int32_t*)&ioctl_command) != 0)
+  {
+    syslog(LOG_ERR, "error");
+    dlclose(library);
+    close(device);
+    closelog();
+    exit(EXIT_FAILURE);
+  }
+
+  // Close the libuLinux_hal library
+  dlclose(library);
 
   // Close the qnap-ec device
   close(device);
+
+  // Close the system log
+  closelog();
 
   exit(EXIT_SUCCESS);
 }

@@ -25,7 +25,7 @@
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/types.h>
-#include "qnap-ec.h"
+#include "qnap-ec-ioctl.h"
 
 // Define constants
 #define QNAP_EC_ID_PORT_1 0x2E
@@ -62,8 +62,7 @@ MODULE_PARM_DESC(qnap_ec_force_id, "Override the detected device ID");
 // Define I/O control data structure
 struct qnap_ec_ioctl_data {
   uint8_t open_device;
-  struct qnap_ec_ioctl_call_func_data call_func_data;
-  struct qnap_ec_ioctl_return_data return_data;
+  struct qnap_ec_ioctl_command ioctl_command;
 };
 
 // Define the devices structure
@@ -283,6 +282,7 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
                                         u32 attribute, int channel)
 {
   // Switch based on the sensor type
+  // Note: we are using a switch statement to simplify possible future expansion
   switch (type)
   {
     case hwmon_fan:
@@ -326,7 +326,20 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   // Declare and/or define needed variables
   struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(device);
 
+  // Define static constant data consisting of the valid fan IDs, valid PWM IDs, and valid
+  //   temperature sensor IDs
+  // Note: IDs are based on the switch statements in the it8528_get_fan_speed, it8528_get_fan_pwm,
+  //       and it8528_get_temperature functions in the libuLinux_hal.so library as decompiled by
+  //       IDA
+  static const uint8_t fan_ids[] = { 5, 7, 10, 11, 25, 35 };
+  static const uint8_t pwm_ids[] = { 5, 7, 25, 35 };
+  static const uint8_t temp_ids[] = { 1, 7, 10, 11, 38 };
+
+  // Get the helper mutex lock
+  mutex_lock(&qnap_ec_helper_mutex);
+
   // Switch based on the sensor type
+  // Note: we are using a switch statement to simplify possible future expansion
   switch (type)
   {
     case hwmon_fan:
@@ -334,65 +347,105 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_fan_input:
-          // Get the helper mutex lock
-          mutex_lock(&qnap_ec_helper_mutex);
+          // Set the ioctl data command fields
+          ioctl_data->ioctl_command.function_type = int64_func_int_uint32pointer;
+          strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_fan_speed",
+            sizeof(ioctl_data->ioctl_command.function_name) - 1);
+          ioctl_data->ioctl_command.argument1_int = fan_ids[channel - 1];
+          ioctl_data->ioctl_command.argument2_uint32 = 0;
 
-          // Set the ioctl data fields to call the correct function with the right arguments
-          ioctl_data->call_func_data.function = ec_sys_get_fan_speed;
-          ioctl_data->call_func_data.argument1 = channel;
-
-          // Set the open device flag to allow communication
-          ioctl_data->open_device = 1;
-
-          // Call the helper program
-          if (qnap_ec_call_helper() != 0)
-          {
-            // Release the helper mutex lock
-            mutex_unlock(&qnap_ec_helper_mutex);
-
-            return -1;
-          }
-
-          // Clear the open device flag
-          ioctl_data->open_device = 0;
-
-          // Set the value to the return data value
-          *value = ioctl_data->return_data.value;
-
-          // Release the helper mutex lock
-          mutex_unlock(&qnap_ec_helper_mutex);
-
-          return 0;
+          break;
         default:
           return -EOPNOTSUPP;
       }
+      break;
     case hwmon_pwm:
       // Switch based on the sensor attribute
       switch (attribute)
       {
         case hwmon_pwm_input:
-          return 0;
+          // Set the ioctl data command fields
+          ioctl_data->ioctl_command.function_type = int64_func_int_uint32pointer;
+          strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
+            sizeof(ioctl_data->ioctl_command.function_name) - 1);
+          ioctl_data->ioctl_command.argument1_int = pwm_ids[channel - 1];
+          ioctl_data->ioctl_command.argument2_uint32 = 0;
+
+          break;
         default:
           return -EOPNOTSUPP;
       }
+      break;
     case hwmon_temp:
       // Switch based on the sensor attribute
       switch (attribute)
       {
         case hwmon_temp_input:
-          return 0;
+          // Set the ioctl data command fields
+          // Note: we are using an int64 field in place of a double field since floating point
+          //       math is not possible in kernel space
+          ioctl_data->ioctl_command.function_type = int64_func_int_doublepointer;
+          strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_temperature",
+            sizeof(ioctl_data->ioctl_command.function_name) - 1);
+          ioctl_data->ioctl_command.argument1_int = temp_ids[channel - 1];
+          ioctl_data->ioctl_command.argument2_int64 = 0;
+
+          break;
         default:
           return -EOPNOTSUPP;
       }
+      break;
     default:
       return -EOPNOTSUPP;
   }
+
+  // Set the open device flag to allow communication
+  ioctl_data->open_device = 1;
+
+  // Call the helper program
+  if (qnap_ec_call_helper() != 0)
+  {
+    // Release the helper mutex lock
+    mutex_unlock(&qnap_ec_helper_mutex);
+
+    return -1;
+  }
+
+  // Clear the open device flag
+  ioctl_data->open_device = 0;
+
+  // Check if the called function returned any errors
+  if (ioctl_data->ioctl_command.return_value_int64 != 0)
+  {
+    // Release the helper mutex lock
+    mutex_unlock(&qnap_ec_helper_mutex);
+
+    return -1;
+  }
+
+  // Set the value to the correct returned value
+  if (ioctl_data->ioctl_command.function_type == int64_func_int_uint32pointer)
+  {
+    *value = ioctl_data->ioctl_command.argument2_uint32;
+  }
+  else // if (ioctl_data->ioctl_command.function_type == int64_func_int_doublepointer)
+  {
+    // Note: we are using an int64 field in place of a double field since floating point math is
+    //       not possible in kernel space
+    *value = ioctl_data->ioctl_command.argument2_int64;
+  }
+
+  // Release the helper mutex lock
+  mutex_unlock(&qnap_ec_helper_mutex);
+
+  return 0;
 }
 
 static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value)
 {
   // Switch based on the sensor type
+  // Note: we are using a switch statement to simplify possible future expansion
   switch (type)
   {
     case hwmon_pwm:
@@ -418,11 +471,11 @@ static int qnap_ec_call_helper()
   // Declare and/or define needed variables
   int return_value;
   char* arguments[] = {
-    "/usr/local/bin/qnap-ec-helper",
+    "/usr/local/sbin/qnap-ec",
     NULL 
   };
   char* environment[] = {
-    "PATH=/usr/local/sbin;/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin",
+    "PATH=/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin",
     NULL
   };
 
@@ -432,11 +485,14 @@ static int qnap_ec_call_helper()
   if ((return_value & 0xFF) != 0)
   {
     // Try calling the user space helper program by name only and rely on the path to resolve
-    //   its location and check if the first 8 bytes of the return value contain any error codes
-    arguments[0] = "qnap-ec-helper";
+    //   its path and check if the first 8 bytes of the return value contain any error codes
+    arguments[0] = "qnap-ec";
     return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
     if ((return_value & 0xFF) != 0)
     {
+      printk(KERN_ERR "qnap-ec-helper program not found in the expected path (/usr/local/sbin) "
+        "or any of the fall back paths (/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin)");
+
       return return_value;
     }    
   }
@@ -494,16 +550,16 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
   // Swtich based on the command
   switch (command)
   {
-    case QNAP_EC_IOCTL_CALL_FUNC:
+    case QNAP_EC_IOCTL_CALL:
       // Make sure we can write the data to user space
-      if (access_ok(argument, sizeof(struct qnap_ec_ioctl_call_func_data)) == 0)
+      if (access_ok(argument, sizeof(struct qnap_ec_ioctl_command)) == 0)
       {
         return -EFAULT;
       }
 
       // Copy the data from the ioctl data structure to the user space
-      if (copy_to_user((int32_t*)argument, &ioctl_data->call_func_data,
-        sizeof(struct qnap_ec_ioctl_call_func_data)) != 0)
+      if (copy_to_user((int32_t*)argument, &ioctl_data->ioctl_command,
+        sizeof(struct qnap_ec_ioctl_command)) != 0)
       {
         return -EFAULT;
       }
@@ -511,14 +567,14 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
       return 0;
     case QNAP_EC_IOCTL_RETURN:
       // Make sure we can read the data from user space
-      if (access_ok(argument, sizeof(struct qnap_ec_ioctl_return_data)) == 0)
+      if (access_ok(argument, sizeof(struct qnap_ec_ioctl_command)) == 0)
       {
         return -EFAULT;
       }
 
       // Copy the data from the user space to the ioctl data structure
-      if (copy_from_user(&ioctl_data->return_data, (int32_t*)argument,
-        sizeof(struct qnap_ec_ioctl_return_data)) != 0)
+      if (copy_from_user(&ioctl_data->ioctl_command, (int32_t*)argument,
+        sizeof(struct qnap_ec_ioctl_command)) != 0)
       {
         return -EFAULT;
       }
