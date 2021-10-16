@@ -27,8 +27,8 @@ INSTALL_COMMAND = $(shell which install)
 
 # Set compiler flags for the module (ccflags-y is used for both builtin and modules) and for the
 #   helper
-ccflags-y = -lgcc -O3 -Wall $(EXTRA_CFLAGS)
-CFLAGS = -ldl -O3 -Wall $(EXTRA_FLAGS)
+ccflags-y = -lgcc -O2 -Wall $(EXTRA_CFLAGS) -DDEBUG
+CFLAGS = -ldl -O2 -Wall $(EXTRA_FLAGS)
 
 # Check if we've been invoked from the kernel build system and can use its language
 ifneq ($(KERNELRELEASE),)

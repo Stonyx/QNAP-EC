@@ -27,6 +27,10 @@
 #include <linux/types.h>
 #include "qnap-ec-ioctl.h"
 
+// Define the printk prefix
+#undef pr_fmt
+#define pr_fmt(fmt) "%s @ %s: " fmt, KBUILD_MODNAME, __FUNCTION__
+
 // Define constants
 #define QNAP_EC_ID_PORT_1 0x2E
 #define QNAP_EC_ID_PORT_2 0x2F
@@ -241,7 +245,7 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
     .config = pwm_config
   };
   static const struct hwmon_channel_info temp_channel_info = {
-    .type = hwmon_pwm,
+    .type = hwmon_temp,
     .config = temp_config
   };
   static const struct hwmon_channel_info* hwmon_channel_info[] = { &fan_channel_info, 
@@ -335,6 +339,10 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   static const uint8_t pwm_ids[] = { 5, 7, 25, 35 };
   static const uint8_t temp_ids[] = { 1, 7, 10, 11, 38 };
 
+  // Print debug message
+  pr_debug("function called with pointer, %u, %u, %i, %li as attributes", type, attribute,
+    channel, *value);
+
   // Get the helper mutex lock
   mutex_lock(&qnap_ec_helper_mutex);
 
@@ -348,10 +356,10 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_fan_input:
           // Set the ioctl data command fields
-          ioctl_data->ioctl_command.function_type = int64_func_int_uint32pointer;
+          ioctl_data->ioctl_command.function_type = int32_func_int32_uint32pointer;
           strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_fan_speed",
             sizeof(ioctl_data->ioctl_command.function_name) - 1);
-          ioctl_data->ioctl_command.argument1_int = fan_ids[channel];
+          ioctl_data->ioctl_command.argument1_int32 = fan_ids[channel];
           ioctl_data->ioctl_command.argument2_uint32 = 0;
 
           break;
@@ -365,11 +373,11 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_pwm_input:
           // Set the ioctl data command fields
-          ioctl_data->ioctl_command.function_type = int64_func_int_uint32pointer;
+          ioctl_data->ioctl_command.function_type = int32_func_uint32_int32pointer;
           strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
             sizeof(ioctl_data->ioctl_command.function_name) - 1);
-          ioctl_data->ioctl_command.argument1_int = pwm_ids[channel];
-          ioctl_data->ioctl_command.argument2_uint32 = 0;
+          ioctl_data->ioctl_command.argument1_uint32 = pwm_ids[channel];
+          ioctl_data->ioctl_command.argument2_int32 = 0;
 
           break;
         default:
@@ -384,10 +392,10 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Set the ioctl data command fields
           // Note: we are using an int64 field in place of a double field since floating point
           //       math is not possible in kernel space
-          ioctl_data->ioctl_command.function_type = int64_func_int_doublepointer;
+          ioctl_data->ioctl_command.function_type = int32_func_int32_doublepointer;
           strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_temperature",
             sizeof(ioctl_data->ioctl_command.function_name) - 1);
-          ioctl_data->ioctl_command.argument1_int = temp_ids[channel];
+          ioctl_data->ioctl_command.argument1_int32 = temp_ids[channel];
           ioctl_data->ioctl_command.argument2_int64 = 0;
 
           break;
@@ -405,6 +413,9 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   // Call the helper program
   if (qnap_ec_call_helper() != 0)
   {
+    // Print debug message
+    pr_debug("qnap_c_call_helper function returned a non zero value");
+
     // Release the helper mutex lock
     mutex_unlock(&qnap_ec_helper_mutex);
 
@@ -415,8 +426,12 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   ioctl_data->open_device = 0;
 
   // Check if the called function returned any errors
-  if (ioctl_data->ioctl_command.return_value_int64 != 0)
+  if (ioctl_data->ioctl_command.return_value_int32 != 0)
   {
+    // Print debug message
+    pr_debug("function called by qnap-ec helper program returned a non zero value of %i",
+      ioctl_data->ioctl_command.return_value_int32);
+
     // Release the helper mutex lock
     mutex_unlock(&qnap_ec_helper_mutex);
 
@@ -424,16 +439,23 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   }
 
   // Set the value to the correct returned value
-  if (ioctl_data->ioctl_command.function_type == int64_func_int_uint32pointer)
+  if (ioctl_data->ioctl_command.function_type == int32_func_int32_uint32pointer)
   {
     *value = ioctl_data->ioctl_command.argument2_uint32;
   }
-  else // if (ioctl_data->ioctl_command.function_type == int64_func_int_doublepointer)
+  else if (ioctl_data->ioctl_command.function_type == int32_func_uint32_int32pointer)
+  {
+    *value = ioctl_data->ioctl_command.argument2_int32;
+  }
+  else // if (ioctl_data->ioctl_command.function_type == int32_func_int32_doublepointer)
   {
     // Note: we are using an int64 field in place of a double field since floating point math is
     //       not possible in kernel space
     *value = ioctl_data->ioctl_command.argument2_int64;
   }
+
+  // Print debug message
+  pr_debug("value set to %li", *value);
 
   // Release the helper mutex lock
   mutex_unlock(&qnap_ec_helper_mutex);
@@ -444,6 +466,10 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
 static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value)
 {
+  // Print debug message
+  pr_debug("function called with pointer, %u, %u, %i, %li as attributes", type, attribute, channel,
+    value);
+
   // Switch based on the sensor type
   // Note: we are using a switch statement to simplify possible future expansion
   switch (type)
@@ -490,10 +516,10 @@ static int qnap_ec_call_helper()
     return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
     if ((return_value & 0xFF) != 0)
     {
-      printk(KERN_ERR "qnap-ec-helper program not found in the expected path (/usr/local/sbin) "
+      printk(KERN_ERR "qnap-ec helper program not found in the expected path (/usr/local/sbin) "
         "or any of the fall back paths (/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin)");
 
-      return return_value;
+      return return_value & 0xFF;
     }    
   }
 
@@ -501,7 +527,10 @@ static int qnap_ec_call_helper()
   //   contain any error codes
   if (((return_value >> 8) & 0xFF) != 0)
   {
-    return return_value;
+    printk(KERN_ERR "qnap-ec helper program exited with a non zero exit code (%i)",
+      ((return_value >> 8) & 0xFF));
+
+    return (return_value >> 8) & 0xFF;
   }
   
   return 0;
@@ -558,7 +587,7 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
       }
 
       // Copy the data from the ioctl data structure to the user space
-      if (copy_to_user((int32_t*)argument, &ioctl_data->ioctl_command,
+      if (copy_to_user((void*)argument, &ioctl_data->ioctl_command,
         sizeof(struct qnap_ec_ioctl_command)) != 0)
       {
         return -EFAULT;
@@ -573,7 +602,7 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
       }
 
       // Copy the data from the user space to the ioctl data structure
-      if (copy_from_user(&ioctl_data->ioctl_command, (int32_t*)argument,
+      if (copy_from_user(&ioctl_data->ioctl_command, (void*)argument,
         sizeof(struct qnap_ec_ioctl_command)) != 0)
       {
         return -EFAULT;
