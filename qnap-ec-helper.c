@@ -46,8 +46,6 @@ int main(int argc, char** argv)
   device = open("/dev/qnap-ec", O_RDWR);
   if (device < 0)
   {
-    syslog(LOG_DEBUG, "open function returned a non zero value trying to open the /dev/qnap-ec "
-      "device");
     closelog();
     exit(EXIT_FAILURE);
   }
@@ -56,8 +54,6 @@ int main(int argc, char** argv)
   //   called
   if (ioctl(device, QNAP_EC_IOCTL_CALL, (int32_t*)&ioctl_command) != 0)
   {
-    syslog(LOG_DEBUG, "ioctl function returned a non zero value trying to make the initial ioctl "
-      "call");
     close(device);
     closelog();
     exit(EXIT_FAILURE);
@@ -91,27 +87,15 @@ int main(int argc, char** argv)
       error = dlerror();
       if (error != NULL)
       {
-        syslog(LOG_DEBUG, "dlsym function returned the following error when looking for the %s "
-          "function:\n%s", ioctl_command.function_name, error);
         dlclose(library);
         close(device);
         closelog();
         exit(EXIT_FAILURE);
       }
 
-      // Log debug messages
-      syslog(LOG_DEBUG, "%s function called with %i, %u arguments", ioctl_command.function_name,
-        ioctl_command.argument1_int32, ioctl_command.argument2_uint32);
-
       // Call the library function
       ioctl_command.return_value_int32 = int32_function_int32_uint32pointer(ioctl_command.
         argument1_int32, &ioctl_command.argument2_uint32);
-
-      // Log debug messages
-      syslog(LOG_DEBUG, "%s function returned %i", ioctl_command.function_name,
-        ioctl_command.return_value_int32);
-      syslog(LOG_DEBUG, "%s function second argument set to %u after the function returned",
-        ioctl_command.function_name, ioctl_command.argument2_uint32);
 
       break;
     case int32_func_uint32_int32pointer:
@@ -123,27 +107,15 @@ int main(int argc, char** argv)
       error = dlerror();
       if (error != NULL)
       {
-        syslog(LOG_DEBUG, "dlsym function returned the following error when looking for the %s "
-          "function:\n%s", ioctl_command.function_name, error);
         dlclose(library);
         close(device);
         closelog();
         exit(EXIT_FAILURE);
       }
 
-      // Log debug messages
-      syslog(LOG_DEBUG, "%s function called with %u, %i arguments", ioctl_command.function_name,
-        ioctl_command.argument1_uint32, ioctl_command.argument2_int32);
-
       // Call the library function
       ioctl_command.return_value_int32 = int32_function_uint32_int32pointer(ioctl_command.
         argument1_uint32, &ioctl_command.argument2_int32);
-
-      // Log debug messages
-      syslog(LOG_DEBUG, "%s function returned %i", ioctl_command.function_name,
-        ioctl_command.return_value_int32);
-      syslog(LOG_DEBUG, "%s function second argument set to %u after the function returned",
-        ioctl_command.function_name, ioctl_command.argument2_uint32);
 
       break;
     case int32_func_int32_doublepointer:
@@ -155,35 +127,28 @@ int main(int argc, char** argv)
       error = dlerror();
       if (error != NULL)
       {
-        syslog(LOG_DEBUG, "dlsym function returned the following error when looking for the %s "
-          "function:\n%s", ioctl_command.function_name, error);
         dlclose(library);
         close(device);
         closelog();
         exit(EXIT_FAILURE);
       }
 
-      // Log debug messages
-      syslog(LOG_DEBUG, "%s function called with %i, %f arguments", ioctl_command.function_name,
-        ioctl_command.argument1_int32, (double)ioctl_command.argument2_int64);
-
-      // Cast the int64 field to a double value
-      // Note: we are using an int64 field instead of a double field because floating point math
-      //       is not possible in kernel space
-      double_value = (double)ioctl_command.argument2_int64;
+      // Cast the int64 field to a double value (see note below)
+      double_value = (double)((long double)ioctl_command.argument2_int64 / (long double)1000);
 
       // Call the library function
       ioctl_command.return_value_int32 = int32_function_int32_doublepointer(ioctl_command.
         argument1_int32, &double_value);
 
-      // Round and cast the double value back to the int64 field
-      ioctl_command.argument2_int64 = (int64_t)(double_value + 0.5);
-
-      // Log debug messages
-      syslog(LOG_DEBUG, "%s function returned %i", ioctl_command.function_name, 
-        ioctl_command.return_value_int32);
-      syslog(LOG_DEBUG, "%s function second argument set to %li after the function returned",
-        ioctl_command.function_name, ioctl_command.argument2_int64);
+      // Cast the double value back to the int64 field by multiplying it by 1000 and rounding it
+      // Note: we are using an int64 field instead of a double field because floating point math
+      //       is not possible in kernel space and because an int64 value can hold a 18 digit
+      //       integer while a double value can hold a 15 digit integer without loosing precision
+      //       we can multiple the double value by 1000 to move three digits after the decimal
+      //       point to before the decimal point and still fit the value in an int64 value and
+      //       preserve three digits after the decimal point
+      ioctl_command.argument2_int64 = (int64_t)((long double)double_value * (long double)1000 +
+        (long double)0.5);
 
       break;
     case int32_func_uint32_int32:
@@ -195,29 +160,18 @@ int main(int argc, char** argv)
       error = dlerror();
       if (error  != NULL)
       {
-        syslog(LOG_DEBUG, "dlsym function returned the following error when looking for the %s "
-          "function:\n%s", ioctl_command.function_name, error);
         dlclose(library);
         close(device);
         closelog();
         exit(EXIT_FAILURE);
       }
 
-      // Log debug messages
-      syslog(LOG_DEBUG, "%s function called with %u, %i arguments", ioctl_command.function_name,
-        ioctl_command.argument1_uint32, ioctl_command.argument2_int32);
-
       // Call the library function
       ioctl_command.return_value_int32 = int32_function_uint32_int32(ioctl_command.argument1_uint32,
         ioctl_command.argument2_int32);
 
-      // Log debug messages
-      syslog(LOG_DEBUG, "%s function returned %i", ioctl_command.function_name,
-        ioctl_command.return_value_int32);
-
       break;
     default:
-      syslog(LOG_DEBUG, "invalid function type received via initial ioctl call");
       dlclose(library);
       close(device);
       closelog();
@@ -227,7 +181,6 @@ int main(int argc, char** argv)
   // Make the I/O control call to the device to return the data
   if (ioctl(device, QNAP_EC_IOCTL_RETURN, (int32_t*)&ioctl_command) != 0)
   {
-    syslog(LOG_DEBUG, "ioctl function returned non zero value when making final ioctl call");
     dlclose(library);
     close(device);
     closelog();

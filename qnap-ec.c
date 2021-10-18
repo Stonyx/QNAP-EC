@@ -37,9 +37,9 @@
 
 // Specify module details
 MODULE_DESCRIPTION("QNAP EC Driver");
+MODULE_VERSION("1.0.0");
 MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
-MODULE_ALIAS("platform:qnap-ec");
 
 // Declare functions
 static int __init qnap_ec_init(void);
@@ -64,9 +64,12 @@ module_param(qnap_ec_force_id, ushort, 0);
 MODULE_PARM_DESC(qnap_ec_force_id, "Override the detected device ID");
 
 // Define I/O control data structure
-struct qnap_ec_ioctl_data {
+struct qnap_ec_data {
   uint8_t open_device;
   struct qnap_ec_ioctl_command ioctl_command;
+  const uint8_t* fan_ids;
+  const uint8_t* pwm_ids;
+  const uint8_t* temp_ids;
 };
 
 // Define the devices structure
@@ -99,7 +102,7 @@ static int __init qnap_ec_init(void)
   // Declare needed variables
   int error;
 
-  // Define static constant data consisting of the miscellaneous driver file operations structure
+  // Define static constant data consisting of the miscellaneous device file operations structure
   static const struct file_operations misc_device_file_ops = {
     .owner = THIS_MODULE,
     .open = &qnap_ec_misc_device_open,
@@ -120,7 +123,7 @@ static int __init qnap_ec_init(void)
     return -ENOMEM;
   }
   qnap_ec_plat_driver->driver.owner = THIS_MODULE;
-  qnap_ec_plat_driver->driver.name = "qnap_ec"; // Dashes are not allowed in driver names
+  qnap_ec_plat_driver->driver.name = "qnap-ec";
   qnap_ec_plat_driver->probe = &qnap_ec_probe;
 
   // Register the driver
@@ -151,7 +154,7 @@ static int __init qnap_ec_init(void)
   //       platform_device_add function instead of the platform_device_register function because
   //       this approach is recommended for legacy type drivers that use hardware probing, all
   //       other hwmon drivers use this approach, and it provides a device release function for us
-  qnap_ec_devices->plat_device = platform_device_alloc("qnap_ec", 0);
+  qnap_ec_devices->plat_device = platform_device_alloc("qnap-ec", 0);
   if (qnap_ec_devices->plat_device == NULL)
   {
     // Free the devices structure memory
@@ -165,7 +168,7 @@ static int __init qnap_ec_init(void)
 
     return -ENOMEM;
   }
-  qnap_ec_devices->plat_device->name = "qnap_ec"; // The name matches the platform driver name
+  qnap_ec_devices->plat_device->name = "qnap-ec";
   qnap_ec_devices->plat_device->id = PLATFORM_DEVID_NONE;
 
   // "Register" the platform device
@@ -224,12 +227,19 @@ static int __init qnap_ec_find(void)
 static int qnap_ec_probe(struct platform_device* platform_dev)
 {
   // Declare needed variables
-  struct qnap_ec_ioctl_data* ioctl_data;
+  struct qnap_ec_data* data;
   struct device* device;
 
-  // Define static constant data consisiting of mulitple configuration arrays, multiple hwmon
-  //   channel info structures, the hwmon channel info structures array, and the hwmon chip
-  //   information structure
+  // Define static constant data consisiting of fanIDs, PWM Ids, temperature sensor IDs, mulitple
+  //   configuration arrays, multiple hwmon channel info structures, the hwmon channel info
+  //   structures array, and the hwmon chip information structure
+  // Note: IDs are based on the switch statements in the ec_sys_get_fan_speed, ec_sys_get_fan_pwm,
+  //       and ec_sys_get_temperature functions in the libuLinux_hal.so library as decompiled by
+  //       IDA
+  // Note: the entries in the configuration arrays need to match the corresponding ID arrays
+  static const uint8_t fan_ids[] = { 5, 7, 10, 11, 25, 35 };
+  static const uint8_t pwm_ids[] = { 5, 7, 25, 35 };
+  static const uint8_t temp_ids[] = { 1, 7, 10, 11, 38 };
   static const u32 fan_config[] = { HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
     HWMON_F_INPUT, HWMON_F_INPUT, 0 };
   static const u32 pwm_config[] = { HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
@@ -260,24 +270,27 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
     .ops = &hwmon_ops
   };
 
-  // Allocate device managed memory for the ioctl data structure
-  ioctl_data = devm_kzalloc(&platform_dev->dev, sizeof(struct qnap_ec_ioctl_data), GFP_KERNEL);
-  if (ioctl_data == NULL)
+  // Allocate device managed memory for the data structure and set various fileds
+  data = devm_kzalloc(&platform_dev->dev, sizeof(struct qnap_ec_data), GFP_KERNEL);
+  if (data == NULL)
   {
     return -ENOMEM;
   }
+  data->fan_ids = fan_ids;
+  data->pwm_ids = pwm_ids;
+  data->temp_ids = temp_ids;
 
-  // Register the hwmon device and include the ioctl data structure
-  // Note: the name matches the platform driver name which doesn't allow dashes
-  device = devm_hwmon_device_register_with_info(&platform_dev->dev, "qnap_ec", ioctl_data,
+  // Register the hwmon device and include the data structure
+  // Note: hwmon device name cannot contain dashes
+  device = devm_hwmon_device_register_with_info(&platform_dev->dev, "qnap_ec", data,
     &hwmon_chip_info, NULL);
   if (device == NULL)
   {
     return -ENOMEM;
   }
 
-  // Set the custom device data to the ioctl data structure
-  dev_set_drvdata(&platform_dev->dev, ioctl_data);
+  // Set the custom device data to the data structure
+  dev_set_drvdata(&platform_dev->dev, data);
 
   return 0;
 }
@@ -294,6 +307,17 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       switch (attribute)
       {
         case hwmon_fan_input:
+          // Check if the fan ID for this channel is not valid
+          // Note: fan IDs 10 and 11 are considered not valid because they cause the libuLinux_hal
+          //       library functions to fail to execute when retrieving data for these IDs and
+          //       based on decompiled code these IDs seem to be only valid in systems with
+          //       redundant power supplies
+          if (((struct qnap_ec_data*)data)->fan_ids[channel] == 10 ||
+            ((struct qnap_ec_data*)data)->fan_ids[channel] == 11)
+          {
+            return 0;
+          }
+
           // Make the fan input read only
           return S_IRUGO;
         default:
@@ -314,6 +338,16 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       switch (attribute)
       {
         case hwmon_temp_input:
+          // Check if the temperature sensors ID for this channel is not valid
+          // Note: temperature sensors IDs 10 and 11 are considered not valid because they cause
+          //       the libuLinux_hal library functions to fail to execute when retrieving data for
+          //       these IDs
+          if (((struct qnap_ec_data*)data)->temp_ids[channel] == 10 ||
+            ((struct qnap_ec_data*)data)->temp_ids[channel] == 11)
+          {
+            return 0;
+          }
+
           // Make the temperature input read only
           return S_IRUGO;
         default:
@@ -328,20 +362,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
                               int channel, long* value)
 {
   // Declare and/or define needed variables
-  struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(device);
-
-  // Define static constant data consisting of the valid fan IDs, valid PWM IDs, and valid
-  //   temperature sensor IDs
-  // Note: IDs are based on the switch statements in the it8528_get_fan_speed, it8528_get_fan_pwm,
-  //       and it8528_get_temperature functions in the libuLinux_hal.so library as decompiled by
-  //       IDA
-  static const uint8_t fan_ids[] = { 5, 7, 10, 11, 25, 35 };
-  static const uint8_t pwm_ids[] = { 5, 7, 25, 35 };
-  static const uint8_t temp_ids[] = { 1, 7, 10, 11, 38 };
-
-  // Print debug message
-  pr_debug("function called with pointer, %u, %u, %i, %li as attributes", type, attribute,
-    channel, *value);
+  struct qnap_ec_data* data = dev_get_drvdata(device);
 
   // Get the helper mutex lock
   mutex_lock(&qnap_ec_helper_mutex);
@@ -355,12 +376,12 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_fan_input:
-          // Set the ioctl data command fields
-          ioctl_data->ioctl_command.function_type = int32_func_int32_uint32pointer;
-          strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_fan_speed",
-            sizeof(ioctl_data->ioctl_command.function_name) - 1);
-          ioctl_data->ioctl_command.argument1_int32 = fan_ids[channel];
-          ioctl_data->ioctl_command.argument2_uint32 = 0;
+          // Set the I/O control command structure fields
+          data->ioctl_command.function_type = int32_func_int32_uint32pointer;
+          strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_speed",
+            sizeof(data->ioctl_command.function_name) - 1);
+          data->ioctl_command.argument1_int32 = data->fan_ids[channel];
+          data->ioctl_command.argument2_uint32 = 0;
 
           break;
         default:
@@ -372,12 +393,12 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_pwm_input:
-          // Set the ioctl data command fields
-          ioctl_data->ioctl_command.function_type = int32_func_uint32_int32pointer;
-          strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
-            sizeof(ioctl_data->ioctl_command.function_name) - 1);
-          ioctl_data->ioctl_command.argument1_uint32 = pwm_ids[channel];
-          ioctl_data->ioctl_command.argument2_int32 = 0;
+          // Set the I/O control command structure fields
+          data->ioctl_command.function_type = int32_func_uint32_int32pointer;
+          strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
+            sizeof(data->ioctl_command.function_name) - 1);
+          data->ioctl_command.argument1_uint32 = data->pwm_ids[channel];
+          data->ioctl_command.argument2_int32 = 0;
 
           break;
         default:
@@ -389,14 +410,14 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_temp_input:
-          // Set the ioctl data command fields
+          // Set the I/O control command structure fields
           // Note: we are using an int64 field in place of a double field since floating point
           //       math is not possible in kernel space
-          ioctl_data->ioctl_command.function_type = int32_func_int32_doublepointer;
-          strncpy(ioctl_data->ioctl_command.function_name, "ec_sys_get_temperature",
-            sizeof(ioctl_data->ioctl_command.function_name) - 1);
-          ioctl_data->ioctl_command.argument1_int32 = temp_ids[channel];
-          ioctl_data->ioctl_command.argument2_int64 = 0;
+          data->ioctl_command.function_type = int32_func_int32_doublepointer;
+          strncpy(data->ioctl_command.function_name, "ec_sys_get_temperature",
+            sizeof(data->ioctl_command.function_name) - 1);
+          data->ioctl_command.argument1_int32 = data->temp_ids[channel];
+          data->ioctl_command.argument2_int64 = 0;
 
           break;
         default:
@@ -408,54 +429,85 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   }
 
   // Set the open device flag to allow communication
-  ioctl_data->open_device = 1;
+  data->open_device = 1;
 
   // Call the helper program
   if (qnap_ec_call_helper() != 0)
   {
-    // Print debug message
-    pr_debug("qnap_c_call_helper function returned a non zero value");
-
     // Release the helper mutex lock
     mutex_unlock(&qnap_ec_helper_mutex);
 
-    return -1;
+    return -ENODATA;
   }
 
   // Clear the open device flag
-  ioctl_data->open_device = 0;
+  data->open_device = 0;
 
   // Check if the called function returned any errors
-  if (ioctl_data->ioctl_command.return_value_int32 != 0)
+  if (data->ioctl_command.return_value_int32 != 0)
   {
-    // Print debug message
-    pr_debug("function called by qnap-ec helper program returned a non zero value of %i",
-      ioctl_data->ioctl_command.return_value_int32);
+    // Log the error
+    printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
+      "a non zero value of %i", data->ioctl_command.function_name,
+      data->ioctl_command.return_value_int32);
 
     // Release the helper mutex lock
     mutex_unlock(&qnap_ec_helper_mutex);
 
-    return -1;
+    return -ENODATA;
   }
 
-  // Set the value to the correct returned value
-  if (ioctl_data->ioctl_command.function_type == int32_func_int32_uint32pointer)
-  {
-    *value = ioctl_data->ioctl_command.argument2_uint32;
-  }
-  else if (ioctl_data->ioctl_command.function_type == int32_func_uint32_int32pointer)
-  {
-    *value = ioctl_data->ioctl_command.argument2_int32;
-  }
-  else // if (ioctl_data->ioctl_command.function_type == int32_func_int32_doublepointer)
-  {
-    // Note: we are using an int64 field in place of a double field since floating point math is
-    //       not possible in kernel space
-    *value = ioctl_data->ioctl_command.argument2_int64;
-  }
 
-  // Print debug message
-  pr_debug("value set to %li", *value);
+  // Switch based on the sensor type
+  // Note: we are using a switch statement to match the switch statement above with the exception
+  //       of error cases
+  switch (type)
+  {
+    case hwmon_fan:
+      // Switch based on the sensor attribute
+      switch (attribute)
+      {
+        case hwmon_fan_input:
+          // Set the value to the correct returned value
+          *value = data->ioctl_command.argument2_uint32;
+
+          break;
+      }
+      break;
+    case hwmon_pwm:
+      // Switch based on the sensor attribute
+      switch (attribute)
+      {
+        case hwmon_pwm_input:
+          // Set the value to the correct returned value
+          *value = data->ioctl_command.argument2_int32;
+
+          break;
+      }
+      break;
+    case hwmon_temp:
+      // Switch based on the sensor attribute
+      switch (attribute)
+      {
+        case hwmon_temp_input:
+          // Set the value to the correct returned value
+          // Note: we are using an int64 field instead of a double field because floating point
+          //       math is not possible in kernel space and because an int64 value can hold a 18
+          //       digit integer while a double value can hold a 15 digit integer without loosing
+          //       precision we can multiple the double value by 1000 to move three digits after
+          //       the decimal point to before the decimal point and still fit the value in an
+          //       int64 value and preserve three digits after the decimal point however because
+          //       we need to return a millidegree value there is no need to divide by 1000
+          *value = data->ioctl_command.argument2_int64;
+
+          break;
+      }
+      break;
+    // Dummy default cause to silence compiler warnings about not including all enums in switch
+    //   statement
+    default:
+      break;
+  }
 
   // Release the helper mutex lock
   mutex_unlock(&qnap_ec_helper_mutex);
@@ -466,10 +518,6 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
 static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value)
 {
-  // Print debug message
-  pr_debug("function called with pointer, %u, %u, %i, %li as attributes", type, attribute, channel,
-    value);
-
   // Switch based on the sensor type
   // Note: we are using a switch statement to simplify possible future expansion
   switch (type)
@@ -543,12 +591,12 @@ static int qnap_ec_misc_device_open(struct inode* inode, struct file* file)
   // Note: the following statement is a combination of the following two statements
   //       struct qnap_ec_devices* devices = container_of(file->private_data,
   //         struct qnap_ec_devices, misc_device);
-  //       struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(&devices->plat_device->dev);
-  struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(&container_of(file->private_data,
+  //       struct qnap_ec_data* data = dev_get_drvdata(&devices->plat_device->dev);
+  struct qnap_ec_data* data = dev_get_drvdata(&container_of(file->private_data,
     struct qnap_ec_devices, misc_device)->plat_device->dev);
 
   // Check if the open device flag is not set which means we are not expecting any communications
-  if (ioctl_data->open_device == 0)
+  if (data->open_device == 0)
   {
     return -EBUSY;
   }
@@ -572,8 +620,8 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
   // Note: the following statement is a combination of the following two statements
   //       struct qnap_ec_devices* devices = container_of(file->private_data,
   //         struct qnap_ec_devices, misc_device);
-  //       struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(&devices->plat_device->dev);
-  struct qnap_ec_ioctl_data* ioctl_data = dev_get_drvdata(&container_of(file->private_data,
+  //       struct qnap_ec_data* data = dev_get_drvdata(&devices->plat_device->dev);
+  struct qnap_ec_data* data = dev_get_drvdata(&container_of(file->private_data,
     struct qnap_ec_devices, misc_device)->plat_device->dev);
 
   // Swtich based on the command
@@ -586,8 +634,8 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
         return -EFAULT;
       }
 
-      // Copy the data from the ioctl data structure to the user space
-      if (copy_to_user((void*)argument, &ioctl_data->ioctl_command,
+      // Copy the I/O control command data from the data structure to the user space
+      if (copy_to_user((void*)argument, &data->ioctl_command,
         sizeof(struct qnap_ec_ioctl_command)) != 0)
       {
         return -EFAULT;
@@ -601,8 +649,8 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
         return -EFAULT;
       }
 
-      // Copy the data from the user space to the ioctl data structure
-      if (copy_from_user(&ioctl_data->ioctl_command, (void*)argument,
+      // Copy the I/O control command data from the user space to the data structure
+      if (copy_from_user(&data->ioctl_command, (void*)argument,
         sizeof(struct qnap_ec_ioctl_command)) != 0)
       {
         return -EFAULT;

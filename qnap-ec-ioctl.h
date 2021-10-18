@@ -48,6 +48,6 @@ struct qnap_ec_ioctl_command {
 };
 
 // Define I/O control commands
-// Note: 0x01 is the first IOCtl number not used according to the kernel documentation
-#define QNAP_EC_IOCTL_CALL _IOR(0x01, 0x01, struct qnap_ec_ioctl_command)
-#define QNAP_EC_IOCTL_RETURN _IOW(0x01, 0x02, struct qnap_ec_ioctl_command)
+// Note: using I/O control number 10 to match the major number of the miscellaneous device
+#define QNAP_EC_IOCTL_CALL _IOR(10, 0, struct qnap_ec_ioctl_command)
+#define QNAP_EC_IOCTL_RETURN _IOW(10, 1, struct qnap_ec_ioctl_command)
