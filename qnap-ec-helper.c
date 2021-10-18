@@ -33,10 +33,9 @@ int main(int argc, char** argv)
   int device;
   void* library;
   struct qnap_ec_ioctl_command ioctl_command;
-  int32_t (*int32_function_int32_uint32pointer)(int32_t, uint32_t*);
-  int32_t (*int32_function_uint32_int32pointer)(uint32_t, int32_t*);
-  int32_t (*int32_function_int32_doublepointer)(int32_t, double*);
-  int32_t (*int32_function_uint32_int32)(uint32_t, int32_t);
+  int16_t (*int16_function_uint16_uint16pointer)(uint16_t, uint16_t*);
+  int16_t (*int16_function_uint16_doublepointer)(uint16_t, double*);
+  int16_t (*int16_function_uint16_uint16)(uint16_t, uint16_t);
   double double_value;
 
   // Open the system log
@@ -78,12 +77,12 @@ int main(int argc, char** argv)
   // Switch based on the function type
   switch (ioctl_command.function_type)
   {
-    case int32_func_int32_uint32pointer:
+    case int16_func_uint16_uint16pointer:
       // Clear any previous dynamic link errors
       dlerror();
 
       // Get a pointer to the function
-      int32_function_int32_uint32pointer = dlsym(library, ioctl_command.function_name);
+      int16_function_uint16_uint16pointer = dlsym(library, ioctl_command.function_name);
       error = dlerror();
       if (error != NULL)
       {
@@ -94,36 +93,16 @@ int main(int argc, char** argv)
       }
 
       // Call the library function
-      ioctl_command.return_value_int32 = int32_function_int32_uint32pointer(ioctl_command.
-        argument1_int32, &ioctl_command.argument2_uint32);
+      ioctl_command.return_value_int16 = int16_function_uint16_uint16pointer(ioctl_command.
+        argument1_uint16, &ioctl_command.argument2_uint16);
 
       break;
-    case int32_func_uint32_int32pointer:
+    case int16_func_uint16_doublepointer:
       // Clear any previous dynamic link errors
       dlerror();
 
       // Get a pointer to the function
-      int32_function_uint32_int32pointer = dlsym(library, ioctl_command.function_name);
-      error = dlerror();
-      if (error != NULL)
-      {
-        dlclose(library);
-        close(device);
-        closelog();
-        exit(EXIT_FAILURE);
-      }
-
-      // Call the library function
-      ioctl_command.return_value_int32 = int32_function_uint32_int32pointer(ioctl_command.
-        argument1_uint32, &ioctl_command.argument2_int32);
-
-      break;
-    case int32_func_int32_doublepointer:
-      // Clear any previous dynamic link errors
-      dlerror();
-
-      // Get a pointer to the function
-      int32_function_int32_doublepointer = dlsym(library, ioctl_command.function_name);
+      int16_function_uint16_doublepointer = dlsym(library, ioctl_command.function_name);
       error = dlerror();
       if (error != NULL)
       {
@@ -137,13 +116,13 @@ int main(int argc, char** argv)
       double_value = (double)((long double)ioctl_command.argument2_int64 / (long double)1000);
 
       // Call the library function
-      ioctl_command.return_value_int32 = int32_function_int32_doublepointer(ioctl_command.
-        argument1_int32, &double_value);
+      ioctl_command.return_value_int16 = int16_function_uint16_doublepointer(ioctl_command.
+        argument1_uint16, &double_value);
 
       // Cast the double value back to the int64 field by multiplying it by 1000 and rounding it
       // Note: we are using an int64 field instead of a double field because floating point math
-      //       is not possible in kernel space and because an int64 value can hold a 18 digit
-      //       integer while a double value can hold a 15 digit integer without loosing precision
+      //       is not possible in kernel space and because an int64 value can hold a 19 digit
+      //       integer while a double value can hold a 16 digit integer without loosing precision
       //       we can multiple the double value by 1000 to move three digits after the decimal
       //       point to before the decimal point and still fit the value in an int64 value and
       //       preserve three digits after the decimal point
@@ -151,12 +130,12 @@ int main(int argc, char** argv)
         (long double)0.5);
 
       break;
-    case int32_func_uint32_int32:
+    case int16_func_uint16_uint16:
       // Clear any previous dynamic link errors
       dlerror();
 
       // Get a pointer to the function
-      int32_function_uint32_int32 = dlsym(library, ioctl_command.function_name);
+      int16_function_uint16_uint16 = dlsym(library, ioctl_command.function_name);
       error = dlerror();
       if (error  != NULL)
       {
@@ -167,8 +146,8 @@ int main(int argc, char** argv)
       }
 
       // Call the library function
-      ioctl_command.return_value_int32 = int32_function_uint32_int32(ioctl_command.argument1_uint32,
-        ioctl_command.argument2_int32);
+      ioctl_command.return_value_int16 = int16_function_uint16_uint16(ioctl_command.argument1_uint16,
+        ioctl_command.argument2_uint16);
 
       break;
     default:

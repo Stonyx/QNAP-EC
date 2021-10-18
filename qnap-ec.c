@@ -377,11 +377,13 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_fan_input:
           // Set the I/O control command structure fields
-          data->ioctl_command.function_type = int32_func_int32_uint32pointer;
+          // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
+          //       on the FIELD_SIZEOF macro which was removed from the kernel
+          data->ioctl_command.function_type = int16_func_uint16_uint16pointer;
           strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_speed",
-            sizeof(data->ioctl_command.function_name) - 1);
-          data->ioctl_command.argument1_int32 = data->fan_ids[channel];
-          data->ioctl_command.argument2_uint32 = 0;
+            sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
+          data->ioctl_command.argument1_uint16 = data->fan_ids[channel];
+          data->ioctl_command.argument2_uint16 = 0;
 
           break;
         default:
@@ -394,11 +396,13 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_pwm_input:
           // Set the I/O control command structure fields
-          data->ioctl_command.function_type = int32_func_uint32_int32pointer;
+          // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
+          //       on the FIELD_SIZEOF macro which was removed from the kernel
+          data->ioctl_command.function_type = int16_func_uint16_uint16pointer;
           strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
-            sizeof(data->ioctl_command.function_name) - 1);
-          data->ioctl_command.argument1_uint32 = data->pwm_ids[channel];
-          data->ioctl_command.argument2_int32 = 0;
+            sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
+          data->ioctl_command.argument1_uint16 = data->pwm_ids[channel];
+          data->ioctl_command.argument2_uint16 = 0;
 
           break;
         default:
@@ -411,12 +415,14 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_temp_input:
           // Set the I/O control command structure fields
+          // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
+          //       on the FIELD_SIZEOF macro which was removed from the kernel
           // Note: we are using an int64 field in place of a double field since floating point
           //       math is not possible in kernel space
-          data->ioctl_command.function_type = int32_func_int32_doublepointer;
+          data->ioctl_command.function_type = int16_func_uint16_doublepointer;
           strncpy(data->ioctl_command.function_name, "ec_sys_get_temperature",
-            sizeof(data->ioctl_command.function_name) - 1);
-          data->ioctl_command.argument1_int32 = data->temp_ids[channel];
+            sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
+          data->ioctl_command.argument1_uint16 = data->temp_ids[channel];
           data->ioctl_command.argument2_int64 = 0;
 
           break;
@@ -444,19 +450,18 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   data->open_device = 0;
 
   // Check if the called function returned any errors
-  if (data->ioctl_command.return_value_int32 != 0)
+  if (data->ioctl_command.return_value_int16 != 0)
   {
     // Log the error
     printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
       "a non zero value of %i", data->ioctl_command.function_name,
-      data->ioctl_command.return_value_int32);
+      data->ioctl_command.return_value_int16);
 
     // Release the helper mutex lock
     mutex_unlock(&qnap_ec_helper_mutex);
 
     return -ENODATA;
   }
-
 
   // Switch based on the sensor type
   // Note: we are using a switch statement to match the switch statement above with the exception
@@ -469,7 +474,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_fan_input:
           // Set the value to the correct returned value
-          *value = data->ioctl_command.argument2_uint32;
+          *value = data->ioctl_command.argument2_uint16;
 
           break;
       }
@@ -480,7 +485,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_pwm_input:
           // Set the value to the correct returned value
-          *value = data->ioctl_command.argument2_int32;
+          *value = data->ioctl_command.argument2_uint16;
 
           break;
       }
@@ -492,8 +497,8 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
         case hwmon_temp_input:
           // Set the value to the correct returned value
           // Note: we are using an int64 field instead of a double field because floating point
-          //       math is not possible in kernel space and because an int64 value can hold a 18
-          //       digit integer while a double value can hold a 15 digit integer without loosing
+          //       math is not possible in kernel space and because an int64 value can hold a 19
+          //       digit integer while a double value can hold a 16 digit integer without loosing
           //       precision we can multiple the double value by 1000 to move three digits after
           //       the decimal point to before the decimal point and still fit the value in an
           //       int64 value and preserve three digits after the decimal point however because
@@ -518,6 +523,12 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
 static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value)
 {
+  // Declare and/or define needed variables
+  struct qnap_ec_data* data = dev_get_drvdata(device);
+
+  // Get the helper mutex lock
+  mutex_lock(&qnap_ec_helper_mutex);
+
   // Switch based on the sensor type
   // Note: we are using a switch statement to simplify possible future expansion
   switch (type)
@@ -527,6 +538,15 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
       switch (attribute)
       {
         case hwmon_pwm_input:
+          // Set the I/O control command structure fields
+          // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
+          //       on the FIELD_SIZEOF macro which was removed from the kernel
+          data->ioctl_command.function_type = int16_func_uint16_uint16;
+          strncpy(data->ioctl_command.function_name, "ec_sys_set_fan_speed",
+            sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
+          data->ioctl_command.argument1_uint16 = data->fan_ids[channel];
+          data->ioctl_command.argument2_uint16 = value;
+
           return 0;
         default:
           return -EOPNOTSUPP;
@@ -534,6 +554,38 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
     default:
       return -EOPNOTSUPP;
   }
+
+  // Set the open device flag to allow communication
+  data->open_device = 1;
+
+  // Call the helper program
+  if (qnap_ec_call_helper() != 0)
+  {
+    // Release the helper mutex lock
+    mutex_unlock(&qnap_ec_helper_mutex);
+
+    return -ENODATA;
+  }
+
+  // Clear the open device flag
+  data->open_device = 0;
+
+  // Check if the called function returned any errors
+  if (data->ioctl_command.return_value_int16 != 0)
+  {
+    // Log the error
+    printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
+      "a non zero value of %i", data->ioctl_command.function_name,
+      data->ioctl_command.return_value_int16);
+
+    // Release the helper mutex lock
+    mutex_unlock(&qnap_ec_helper_mutex);
+
+    return -ENODATA;
+  }
+
+  // Release the helper mutex lock
+  mutex_unlock(&qnap_ec_helper_mutex);
 }
 
 // Function called to call the user space helper program
