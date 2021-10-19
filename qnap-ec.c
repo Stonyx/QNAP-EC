@@ -18,6 +18,7 @@
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/hwmon.h>
+#include <linux/io.h>
 #include <linux/ioctl.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
@@ -29,11 +30,7 @@
 
 // Define the printk prefix
 #undef pr_fmt
-#define pr_fmt(fmt) "%s @ %s: " fmt, KBUILD_MODNAME, __FUNCTION__
-
-// Define constants
-#define QNAP_EC_ID_PORT_1 0x2E
-#define QNAP_EC_ID_PORT_2 0x2F
+#define pr_fmt(fmt) "%s @ %s: " fmt, "qnap-ec", __FUNCTION__
 
 // Specify module details
 MODULE_DESCRIPTION("QNAP EC Driver");
@@ -86,7 +83,7 @@ struct qnap_ec_devices {
 DEFINE_MUTEX(qnap_ec_helper_mutex);
 DEFINE_MUTEX(qnap_ec_misc_device_mutex);
 
-// Specifiy the init and exit functions
+// Specifiy the initialization and exit functions
 module_init(qnap_ec_init);
 module_exit(qnap_ec_exit);
 
@@ -111,9 +108,10 @@ static int __init qnap_ec_init(void)
   };
 
   // Check if we can't find the chip
-  if (qnap_ec_find() != 0)
+  error = qnap_ec_find();
+  if (error)
   {
-    return -ENODEV;
+    return error;
   }
 
   // Allocate memory for the platform driver structure and populate various fields
@@ -220,6 +218,38 @@ static int __init qnap_ec_init(void)
 // Function called to find the QNAP embedded controller
 static int __init qnap_ec_find(void)
 {
+  // Declare needed variables
+  uint8_t byte1;
+  uint8_t byte2;
+
+  // Request access to the input (0x2E) and output (0x2F) ports
+  if (request_muxed_region(0x2E, 2, "qnap-ec") == NULL)
+  {
+    return -EBUSY;
+  }
+
+  // Write 0x20 to the input port
+  outb(0x20, 0x2E);
+
+  // Read the first identification byte from the output port
+  byte1 = inb(0x2F);
+
+  // Write 0x21 to the input port
+  outb(0x21, 0x2E);
+
+  // Read the second identification byte from the output port
+  byte2 = inb(0x2F);
+
+  // Check if the identification bytes do not match the expected values
+  if (byte1 != 0x85 || byte2 != 0x28)
+  {
+    release_region(0x2E, 2);
+    return -ENODEV;
+  }
+
+  // Release access to the input and output ports
+  release_region(0x2E, 2);
+
   return 0;
 }
 
