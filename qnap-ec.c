@@ -261,11 +261,11 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   //   structures array, and the hwmon chip information structure
   // Note: IDs are based on the switch statements in the ec_sys_get_fan_speed, ec_sys_get_fan_pwm,
   //       and ec_sys_get_temperature functions in the libuLinux_hal.so library as decompiled by
-  //       IDA
+  //       IDA and on trial and error testing of various IDs
   // Note: the entries in the configuration arrays need to match the corresponding ID arrays
-  static const uint8_t fan_ids[] = { 5, 7, 10, 11, 25, 35 };
-  static const uint8_t pwm_ids[] = { 5, 7, 25, 35 };
-  static const uint8_t temp_ids[] = { 1, 7, 10, 11, 38 };
+  static const uint8_t fan_ids[] = { 0, 6, 10, 11, 20, 30 };
+  static const uint8_t pwm_ids[] = { 0, 6, 20, 30 };
+  static const uint8_t temp_ids[] = { 0, 5, 10, 11, 15 };
   static const u32 fan_config[] = { HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
     HWMON_F_INPUT, HWMON_F_INPUT, 0 };
   static const u32 pwm_config[] = { HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
