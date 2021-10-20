@@ -1,1 +1,5 @@
-# QNAP-EC
+# QNAP-EC - HWMon Driver for QNAP IT8528 E.C. Chips
+
+A Linux hwmon driver kernel module for the QNAP IT8528 Embedded Controller chip (and possibly others).  This driver supports reading the fan speeds and temperatures as well as reading and writing the fan P.W.M. values from the ITE Tech Inc. IT8528 embedded controller chip that is used in many QNAP NAS models.  Because the IT8528 chip can run custom firmware this driver is most likely specific to the firmware that QNAP uses on these chips.  It is based on the reverse engineering knowledge originally gathered by [guedou](https://github.com/guedou) with lots of operational and testing help provided by [r-pufky](https://github.com/r-pufky).
+
+In order to provide the greatest compatibility, this driver uses a library that is supplied by QNAP in it's NAS operating system.  The libuLinux_hal library that is part of this repository was taken from a QNAP-TS873A model.  In order to ensure proper functionality you should replace the libuLinux_hal.so library file with one from the operating system image for the exact QNAP NAS model you will be running this driver on.  Because this driver uses the QNAP library it is conceivable that it will work with other chips used by QNAP that are supported by the libuLinux_hal library.
