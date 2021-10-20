@@ -15,10 +15,9 @@
  * Cambridge, MA 02139, USA.
  */
 
-// Define the I/O control function types enum
 // Note: these function types are based on function signatures in the libuLinux_hal.so library
 //       as decompiled by Ghidra (where int is 4 bytes long, uint4 is 4 bytes long, undefined4 is
-//       4 bytes long and assumed signed, and double is 8 bytes long):
+//       4 bytes long and assumed unsigned, and double is 8 bytes long):
 //       int ec_sys_get_fan_speed(int param_1, uint* param_2)
 //       int ec_sys_get_fan_pwm(undefined4 param_1, int* param_2)
 //       int ec_sys_get_temperature(int param_1, double*param_2)
@@ -33,12 +32,14 @@
 //                                                 int a5, int a6)
 //       __int64 __fastcall ec_sys_set_fan_speed(int a1, int a2, __int64 a3, __int64 a4, int a5,
 //                                               int a6)
-//       and on trial and error testing to determine which function signatures result in the
-//       correct behaviour
+//       and on trial and error testing of various function signatures where it was determined
+//       that the IDA decompiled versions are closest to the correct function signatures if int
+//       is assumed to be 1 byte long and unsigned and the return type is changed to an int that
+//       is 1, 2, or 4 bytes long
 enum qnap_ec_ioctl_function_type {
-  int16_func_uint16_uint16pointer,
-  int16_func_uint16_doublepointer,
-  int16_func_uint16_uint16
+  int8_func_uint8_uint32pointer,
+  int8_func_uint8_doublepointer,
+  int8_func_uint8_uint8
 };
 
 // Define the I/O control command structure
@@ -47,10 +48,11 @@ enum qnap_ec_ioctl_function_type {
 struct qnap_ec_ioctl_command {
   enum qnap_ec_ioctl_function_type function_type;
   char function_name[50];
-  uint16_t argument1_uint16;
-  uint16_t argument2_uint16;
-  int64_t argument2_int64;        
-  int16_t return_value_int16;
+  uint8_t argument1_uint8;
+  uint8_t argument2_uint8;
+  uint32_t argument2_uint32;
+  int64_t argument2_int64;
+  int8_t return_value_int8;
 };
 
 // Define I/O control commands

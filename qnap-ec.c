@@ -64,9 +64,9 @@ MODULE_PARM_DESC(qnap_ec_force_id, "Override the detected device ID");
 struct qnap_ec_data {
   uint8_t open_device;
   struct qnap_ec_ioctl_command ioctl_command;
-  const uint16_t* fan_ids;
-  const uint16_t* pwm_ids;
-  const uint16_t* temp_ids;
+  const uint8_t* fan_ids;
+  const uint8_t* pwm_ids;
+  const uint8_t* temp_ids;
 };
 
 // Define the devices structure
@@ -267,9 +267,9 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   //       and ec_sys_get_temperature functions in the libuLinux_hal.so library as decompiled by
   //       IDA
   // Note: the entries in the configuration arrays need to match the corresponding ID arrays
-  static const uint16_t fan_ids[] = { 5, 7, 10, 11, 25, 35 };
-  static const uint16_t pwm_ids[] = { 5, 7, 25, 35 };
-  static const uint16_t temp_ids[] = { 1, 7, 10, 11, 38 };
+  static const uint8_t fan_ids[] = { 5, 7, 10, 11, 25, 35 };
+  static const uint8_t pwm_ids[] = { 5, 7, 25, 35 };
+  static const uint8_t temp_ids[] = { 1, 7, 10, 11, 38 };
   static const u32 fan_config[] = { HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
     HWMON_F_INPUT, HWMON_F_INPUT, 0 };
   static const u32 pwm_config[] = { HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
@@ -409,11 +409,11 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Set the I/O control command structure fields
           // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
           //       on the FIELD_SIZEOF macro which was removed from the kernel
-          data->ioctl_command.function_type = int16_func_uint16_uint16pointer;
+          data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
           strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_speed",
             sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint16 = data->fan_ids[channel];
-          data->ioctl_command.argument2_uint16 = 0;
+          data->ioctl_command.argument1_uint8 = data->fan_ids[channel];
+          data->ioctl_command.argument2_uint32 = 0;
 
           break;
         default:
@@ -428,11 +428,11 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Set the I/O control command structure fields
           // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
           //       on the FIELD_SIZEOF macro which was removed from the kernel
-          data->ioctl_command.function_type = int16_func_uint16_uint16pointer;
+          data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
           strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
             sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint16 = data->pwm_ids[channel];
-          data->ioctl_command.argument2_uint16 = 0;
+          data->ioctl_command.argument1_uint8 = data->pwm_ids[channel];
+          data->ioctl_command.argument2_uint32 = 0;
 
           break;
         default:
@@ -449,10 +449,10 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           //       on the FIELD_SIZEOF macro which was removed from the kernel
           // Note: we are using an int64 field in place of a double field since floating point
           //       math is not possible in kernel space
-          data->ioctl_command.function_type = int16_func_uint16_doublepointer;
+          data->ioctl_command.function_type = int8_func_uint8_doublepointer;
           strncpy(data->ioctl_command.function_name, "ec_sys_get_temperature",
             sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint16 = data->temp_ids[channel];
+          data->ioctl_command.argument1_uint8 = data->temp_ids[channel];
           data->ioctl_command.argument2_int64 = 0;
 
           break;
@@ -480,12 +480,12 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   data->open_device = 0;
 
   // Check if the called function returned any errors
-  if (data->ioctl_command.return_value_int16 != 0)
+  if (data->ioctl_command.return_value_int8 != 0)
   {
     // Log the error
     printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
       "a non zero value of %i", data->ioctl_command.function_name,
-      data->ioctl_command.return_value_int16);
+      data->ioctl_command.return_value_int8);
 
     // Release the helper mutex lock
     mutex_unlock(&qnap_ec_helper_mutex);
@@ -504,7 +504,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_fan_input:
           // Set the value to the correct returned value
-          *value = data->ioctl_command.argument2_uint16;
+          *value = data->ioctl_command.argument2_uint32;
 
           break;
       }
@@ -515,7 +515,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_pwm_input:
           // Set the value to the correct returned value
-          *value = data->ioctl_command.argument2_uint16;
+          *value = data->ioctl_command.argument2_uint32;
 
           break;
       }
@@ -571,11 +571,11 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
           // Set the I/O control command structure fields
           // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
           //       on the FIELD_SIZEOF macro which was removed from the kernel
-          data->ioctl_command.function_type = int16_func_uint16_uint16;
+          data->ioctl_command.function_type = int8_func_uint8_uint8;
           strncpy(data->ioctl_command.function_name, "ec_sys_set_fan_speed",
             sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint16 = data->fan_ids[channel];
-          data->ioctl_command.argument2_uint16 = value;
+          data->ioctl_command.argument1_uint8 = data->fan_ids[channel];
+          data->ioctl_command.argument2_uint8 = value;
 
           return 0;
         default:
@@ -601,12 +601,12 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
   data->open_device = 0;
 
   // Check if the called function returned any errors
-  if (data->ioctl_command.return_value_int16 != 0)
+  if (data->ioctl_command.return_value_int8 != 0)
   {
     // Log the error
     printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
       "a non zero value of %i", data->ioctl_command.function_name,
-      data->ioctl_command.return_value_int16);
+      data->ioctl_command.return_value_int8);
 
     // Release the helper mutex lock
     mutex_unlock(&qnap_ec_helper_mutex);

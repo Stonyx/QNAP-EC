@@ -33,9 +33,9 @@ int main(int argc, char** argv)
   int device;
   void* library;
   struct qnap_ec_ioctl_command ioctl_command;
-  int16_t (*int16_function_uint16_uint16pointer)(uint16_t, uint16_t*);
-  int16_t (*int16_function_uint16_doublepointer)(uint16_t, double*);
-  int16_t (*int16_function_uint16_uint16)(uint16_t, uint16_t);
+  int8_t (*int8_function_uint8_uint32pointer)(uint8_t, uint32_t*);
+  int8_t (*int8_function_uint8_doublepointer)(uint8_t, double*);
+  int16_t (*int8_function_uint8_uint8)(uint8_t, uint8_t);
   double double_value;
 
   // Open the system log
@@ -51,7 +51,7 @@ int main(int argc, char** argv)
 
   // Make a I/O control call to the device to find out which function in the library needs to be
   //   called
-  if (ioctl(device, QNAP_EC_IOCTL_CALL, (int32_t*)&ioctl_command) != 0)
+  if (ioctl(device, QNAP_EC_IOCTL_CALL, &ioctl_command) != 0)
   {
     close(device);
     closelog();
@@ -77,12 +77,12 @@ int main(int argc, char** argv)
   // Switch based on the function type
   switch (ioctl_command.function_type)
   {
-    case int16_func_uint16_uint16pointer:
+    case int8_func_uint8_uint32pointer:
       // Clear any previous dynamic link errors
       dlerror();
 
       // Get a pointer to the function
-      int16_function_uint16_uint16pointer = dlsym(library, ioctl_command.function_name);
+      int8_function_uint8_uint32pointer = dlsym(library, ioctl_command.function_name);
       error = dlerror();
       if (error != NULL)
       {
@@ -93,16 +93,16 @@ int main(int argc, char** argv)
       }
 
       // Call the library function
-      ioctl_command.return_value_int16 = int16_function_uint16_uint16pointer(ioctl_command.
-        argument1_uint16, &ioctl_command.argument2_uint16);
+      ioctl_command.return_value_int8 = int8_function_uint8_uint32pointer(ioctl_command.
+        argument1_uint8, &ioctl_command.argument2_uint32);
 
       break;
-    case int16_func_uint16_doublepointer:
+    case int8_func_uint8_doublepointer:
       // Clear any previous dynamic link errors
       dlerror();
 
       // Get a pointer to the function
-      int16_function_uint16_doublepointer = dlsym(library, ioctl_command.function_name);
+      int8_function_uint8_doublepointer = dlsym(library, ioctl_command.function_name);
       error = dlerror();
       if (error != NULL)
       {
@@ -116,8 +116,8 @@ int main(int argc, char** argv)
       double_value = (double)((long double)ioctl_command.argument2_int64 / (long double)1000);
 
       // Call the library function
-      ioctl_command.return_value_int16 = int16_function_uint16_doublepointer(ioctl_command.
-        argument1_uint16, &double_value);
+      ioctl_command.return_value_int8 = int8_function_uint8_doublepointer(ioctl_command.
+        argument1_uint8, &double_value);
 
       // Cast the double value back to the int64 field by multiplying it by 1000 and rounding it
       // Note: we are using an int64 field instead of a double field because floating point math
@@ -130,12 +130,12 @@ int main(int argc, char** argv)
         (long double)0.5);
 
       break;
-    case int16_func_uint16_uint16:
+    case int8_func_uint8_uint8:
       // Clear any previous dynamic link errors
       dlerror();
 
       // Get a pointer to the function
-      int16_function_uint16_uint16 = dlsym(library, ioctl_command.function_name);
+      int8_function_uint8_uint8 = dlsym(library, ioctl_command.function_name);
       error = dlerror();
       if (error  != NULL)
       {
@@ -146,8 +146,8 @@ int main(int argc, char** argv)
       }
 
       // Call the library function
-      ioctl_command.return_value_int16 = int16_function_uint16_uint16(ioctl_command.argument1_uint16,
-        ioctl_command.argument2_uint16);
+      ioctl_command.return_value_int8 = int8_function_uint8_uint8(ioctl_command.argument1_uint8,
+        ioctl_command.argument2_uint8);
 
       break;
     default:
@@ -158,7 +158,7 @@ int main(int argc, char** argv)
   }
 
   // Make the I/O control call to the device to return the data
-  if (ioctl(device, QNAP_EC_IOCTL_RETURN, (int32_t*)&ioctl_command) != 0)
+  if (ioctl(device, QNAP_EC_IOCTL_RETURN, &ioctl_command) != 0)
   {
     dlclose(library);
     close(device);
