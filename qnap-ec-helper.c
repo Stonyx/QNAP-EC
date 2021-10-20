@@ -19,7 +19,6 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <syslog.h>
 #include <unistd.h>
 #include <sys/ioctl.h>

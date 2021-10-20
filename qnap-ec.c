@@ -15,17 +15,13 @@
  * Cambridge, MA 02139, USA.
  */
 
-#include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/hwmon.h>
 #include <linux/io.h>
-#include <linux/ioctl.h>
 #include <linux/miscdevice.h>
 #include <linux/module.h>
-#include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
-#include <linux/types.h>
 #include "qnap-ec-ioctl.h"
 
 // Define the printk prefix
