@@ -35,7 +35,7 @@ int main(int argc, char** argv)
   struct qnap_ec_ioctl_command ioctl_command;
   int8_t (*int8_function_uint8_uint32pointer)(uint8_t, uint32_t*);
   int8_t (*int8_function_uint8_doublepointer)(uint8_t, double*);
-  int16_t (*int8_function_uint8_uint8)(uint8_t, uint8_t);
+  int8_t (*int8_function_uint8_uint8)(uint8_t, uint8_t);
   double double_value;
 
   // Open the system log
