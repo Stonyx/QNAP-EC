@@ -35,7 +35,7 @@ MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
 
 // Define the devices structure
-// Note: in order to use the platform_device_alloc function (see note in the qnap_ec_init 
+// Note: in order to use the platform_device_alloc function (see note in the qnap_ec_init
 //       function) we need to make the plat_device member a pointer and in order to use the
 //       container_of macro in the qnap_ec_misc_dev_open and qnap_ec_misc_dev_ioctl functions
 //       we need to make the misc_device member not a pointer
@@ -283,18 +283,18 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
     HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
     HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, 0 };
   static const u32 pwm_config[] = { HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
     HWMON_PWM_INPUT, 0 };
   static const u32 temp_config[] = { HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
     HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
@@ -319,7 +319,7 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
     .type = hwmon_temp,
     .config = temp_config
   };
-  static const struct hwmon_channel_info* hwmon_channel_info[] = { &fan_channel_info, 
+  static const struct hwmon_channel_info* hwmon_channel_info[] = { &fan_channel_info,
     &pwm_channel_info, &temp_channel_info, NULL };
   static const struct hwmon_ops hwmon_ops = {
     .is_visible = &qnap_ec_hwmon_is_visible,
@@ -1039,7 +1039,7 @@ static int qnap_ec_call_helper(uint8_t log_error)
   int return_value;
   char* arguments[] = {
     "/usr/local/sbin/qnap-ec",
-    NULL 
+    NULL
   };
   char* environment[] = {
     "PATH=/usr/local/sbin;/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin",
@@ -1079,11 +1079,11 @@ static int qnap_ec_call_helper(uint8_t log_error)
 
               // Return the call_usermodehelper function's error code
               return return_value & 0xFF;
-            }    
-          }    
-        }    
+            }
+          }
+        }
       }
-    }    
+    }
   }
 
   // Check if the user space helper program's return value stored in the second 8 bits of the
@@ -1100,7 +1100,7 @@ static int qnap_ec_call_helper(uint8_t log_error)
     // Return the user space helper program's error code
     return (return_value >> 8) & 0xFF;
   }
-  
+
   return 0;
 }
 
