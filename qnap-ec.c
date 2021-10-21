@@ -627,29 +627,49 @@ static int qnap_ec_call_helper()
     NULL 
   };
   char* environment[] = {
-    "PATH=/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin",
+    "PATH=/usr/local/sbin;/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin",
     NULL
   };
 
-  // Call the user space helper program and check if the first 8 bytes of the return value
-  //   container any error codes
+  // Call the user space helper program and check if the first 8 bits of the return value
+  //   contain any error codes
   return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
   if ((return_value & 0xFF) != 0)
   {
-    // Try calling the user space helper program by name only and rely on the path to resolve
-    //   its path and check if the first 8 bytes of the return value contain any error codes
-    arguments[0] = "qnap-ec";
+    // Try calling the user space helper program in the fall back locations
+    arguments[0] = "/usr/local/bin/qnap-ec";
     return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
     if ((return_value & 0xFF) != 0)
     {
-      printk(KERN_ERR "qnap-ec helper program not found in the expected path (/usr/local/sbin) "
-        "or any of the fall back paths (/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin)");
+      arguments[0] = "/usr/sbin/qnap-ec";
+      return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
+      if ((return_value & 0xFF) != 0)
+      {
+        arguments[0] = "/usr/bin/qnap-ec";
+        return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
+        if ((return_value & 0xFF) != 0)
+        {
+          arguments[0] = "/sbin/qnap-ec";
+          return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
+          if ((return_value & 0xFF) != 0)
+          {
+            arguments[0] = "/bin/qnap-ec";
+            return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
+            if ((return_value & 0xFF) != 0)
+            {
+              printk(KERN_ERR "qnap-ec helper program not found in the expected path "
+                "(/usr/local/sbin) or any of the fall back paths (/usr/local/bin;/usr/sbin;"
+                "/usr/bin;/sbin;/bin)");
 
-      return return_value & 0xFF;
+              return return_value & 0xFF;
+            }    
+          }    
+        }    
+      }
     }    
   }
 
-  // Check if the helper program return value stored in the next 8 bytes of the return value
+  // Check if the helper program return value stored in the second 8 bits of the return value
   //   contain any error codes
   if (((return_value >> 8) & 0xFF) != 0)
   {

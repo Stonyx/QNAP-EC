@@ -85,6 +85,7 @@ int main(int argc, char** argv)
       error = dlerror();
       if (error != NULL)
       {
+        syslog(LOG_ERR, "encountered the following dynamic linker error: %s", error);
         dlclose(library);
         close(device);
         closelog();
@@ -105,6 +106,7 @@ int main(int argc, char** argv)
       error = dlerror();
       if (error != NULL)
       {
+        syslog(LOG_ERR, "encountered the following dynamic linker error: %s", error);
         dlclose(library);
         close(device);
         closelog();
@@ -138,6 +140,7 @@ int main(int argc, char** argv)
       error = dlerror();
       if (error  != NULL)
       {
+        syslog(LOG_ERR, "encountered the following dynamic linker error: %s", error);
         dlclose(library);
         close(device);
         closelog();
