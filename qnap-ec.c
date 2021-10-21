@@ -34,6 +34,29 @@ MODULE_VERSION("1.0.0");
 MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
 
+// Define the devices structure
+// Note: in order to use the platform_device_alloc function (see note in the qnap_ec_init 
+//       function) we need to make the plat_device member a pointer and in order to use the
+//       container_of macro in the qnap_ec_misc_dev_open and qnap_ec_misc_dev_ioctl functions
+//       we need to make the misc_device member not a pointer
+struct qnap_ec_devices {
+  struct platform_device* plat_device;
+  struct mutex misc_device_mutex;
+  uint8_t open_misc_device;
+  struct miscdevice misc_device;
+};
+
+// Define the I/O control data structure
+struct qnap_ec_data {
+  struct mutex mutex;
+  struct qnap_ec_devices* devices;
+  struct qnap_ec_ioctl_command ioctl_command;
+  uint64_t fan_or_pwm_channel_checked_field;
+  uint64_t fan_or_pwm_channel_valid_field;
+  uint64_t temp_channel_checked_field;
+  uint64_t temp_channel_valid_field;
+};
+
 // Declare functions
 static int __init qnap_ec_init(void);
 static int __init qnap_ec_find(void);
@@ -44,7 +67,9 @@ static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, 
                               int channel, long* value);
 static int qnap_ec_hwmon_write(struct device* dev, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value);
-static int qnap_ec_call_helper(void);
+static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int channel);
+static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel);
+static int qnap_ec_call_helper(uint8_t log_error);
 static int qnap_ec_misc_device_open(struct inode* inode, struct file* file);
 static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int command,
                                           unsigned long argument);
@@ -55,29 +80,6 @@ static void __exit qnap_ec_exit(void);
 static unsigned short qnap_ec_force_id;
 module_param(qnap_ec_force_id, ushort, 0);
 MODULE_PARM_DESC(qnap_ec_force_id, "Override the detected device ID");
-
-// Define I/O control data structure
-struct qnap_ec_data {
-  uint8_t open_device;
-  struct qnap_ec_ioctl_command ioctl_command;
-  const uint8_t* fan_ids;
-  const uint8_t* pwm_ids;
-  const uint8_t* temp_ids;
-};
-
-// Define the devices structure
-// Note: in order to use the platform_device_alloc function (see note in the qnap_ec_init 
-//       function) we need to make the plat_device member a pointer and in order to use the
-//       container_of macro in the qnap_ec_misc_dev_open and qnap_ec_misc_dev_ioctl functions
-//       we need to make the misc_device member not a pointer
-struct qnap_ec_devices {
-  struct platform_device* plat_device;
-  struct miscdevice misc_device;
-};
-
-// Define the mutexes
-DEFINE_MUTEX(qnap_ec_helper_mutex);
-DEFINE_MUTEX(qnap_ec_misc_device_mutex);
 
 // Specifiy the initialization and exit functions
 module_init(qnap_ec_init);
@@ -184,6 +186,9 @@ static int __init qnap_ec_init(void)
     return error;
   }
 
+  // Initialize the miscellaneous device mutex
+  mutex_init(&qnap_ec_devices->misc_device_mutex);
+
   // Populate various miscellaneous device structure fields
   qnap_ec_devices->misc_device.name = "qnap-ec";
   qnap_ec_devices->misc_device.minor = MISC_DYNAMIC_MINOR;
@@ -256,22 +261,52 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   struct qnap_ec_data* data;
   struct device* device;
 
-  // Define static constant data consisiting of fanIDs, PWM Ids, temperature sensor IDs, mulitple
-  //   configuration arrays, multiple hwmon channel info structures, the hwmon channel info
-  //   structures array, and the hwmon chip information structure
-  // Note: IDs are based on the switch statements in the ec_sys_get_fan_speed, ec_sys_get_fan_pwm,
-  //       and ec_sys_get_temperature functions in the libuLinux_hal.so library as decompiled by
-  //       IDA and on trial and error testing of various IDs
-  // Note: the entries in the configuration arrays need to match the corresponding ID arrays
-  static const uint8_t fan_ids[] = { 0, 6, 10, 11, 20, 30 };
-  static const uint8_t pwm_ids[] = { 0, 6, 20, 30 };
-  static const uint8_t temp_ids[] = { 0, 5, 10, 11, 15 };
+  // Define static constant data consisiting of mulitple configuration arrays, multiple hwmon
+  //   channel info structures, the hwmon channel info structures array, and the hwmon chip
+  //   information structure
+  // Note: the number of entries in the configuration arrays need to match the number of supported
+  //       channels in the fan_or_pwm_channel_checked/valid_field and
+  //       temp_channel_checked/valid_field bitfield members in the qnap_ec_data structure which
+  //       is based on the switch statements in the ec_sys_get_fan_status, ec_sys_get_fan_speed,
+  //       ec_sys_get_fan_pwm, and ec_sys_get_temperature functions in the libuLinux_hal.so library
+  //       as decompiled by IDA and rounded up to the nearest multiple of 32 to allow for future
+  //       additions of channels in those functions
   static const u32 fan_config[] = { HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, 0 };
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
+    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, 0 };
   static const u32 pwm_config[] = { HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
+    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, 
     HWMON_PWM_INPUT, 0 };
   static const u32 temp_config[] = { HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, 0 };
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
+    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, 0 };
   static const struct hwmon_channel_info fan_channel_info = {
     .type = hwmon_fan,
     .config = fan_config
@@ -296,15 +331,16 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
     .ops = &hwmon_ops
   };
 
-  // Allocate device managed memory for the data structure and set various fileds
+  // Allocate device managed memory for the data structure
   data = devm_kzalloc(&platform_dev->dev, sizeof(struct qnap_ec_data), GFP_KERNEL);
   if (data == NULL)
   {
     return -ENOMEM;
   }
-  data->fan_ids = fan_ids;
-  data->pwm_ids = pwm_ids;
-  data->temp_ids = temp_ids;
+
+  // Initialize the data mutex and set the devices pointer
+  mutex_init(&data->mutex);
+  data->devices = qnap_ec_devices;
 
   // Register the hwmon device and include the data structure
   // Note: hwmon device name cannot contain dashes
@@ -321,6 +357,7 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   return 0;
 }
 
+// Function called to check if a hwmon attribute is visible
 static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_types type,
                                         u32 attribute, int channel)
 {
@@ -333,19 +370,14 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       switch (attribute)
       {
         case hwmon_fan_input:
-          // Check if the fan ID for this channel is not valid
-          // Note: fan IDs 10 and 11 are considered not valid because they cause the libuLinux_hal
-          //       library functions to fail to execute when retrieving data for these IDs and
-          //       based on decompiled code these IDs seem to be only valid in systems with
-          //       redundant power supplies
-          if (((struct qnap_ec_data*)data)->fan_ids[channel] == 10 ||
-            ((struct qnap_ec_data*)data)->fan_ids[channel] == 11)
+          // Check if this channel is valid
+          if (qnap_ec_is_fan_or_pwm_channel_valid((struct qnap_ec_data*)data, channel) == 1)
           {
-            return 0;
+            // Make the fan input read only
+            return S_IRUGO;
           }
 
-          // Make the fan input read only
-          return S_IRUGO;
+          return 0;
         default:
           return 0;
       }
@@ -354,8 +386,14 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       switch (attribute)
       {
         case hwmon_pwm_input:
-          // Make the PWM input read/write
-          return S_IRUGO | S_IWUSR;
+          // Check if this channel is valid
+          if (qnap_ec_is_fan_or_pwm_channel_valid((struct qnap_ec_data*)data, channel) == 1)
+          {
+            // Make the PWM input read/write
+            return S_IRUGO | S_IWUSR;
+          }
+
+          return 0;
         default:
           return 0;
       }
@@ -364,18 +402,14 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       switch (attribute)
       {
         case hwmon_temp_input:
-          // Check if the temperature sensors ID for this channel is not valid
-          // Note: temperature sensors IDs 10 and 11 are considered not valid because they cause
-          //       the libuLinux_hal library functions to fail to execute when retrieving data for
-          //       these IDs
-          if (((struct qnap_ec_data*)data)->temp_ids[channel] == 10 ||
-            ((struct qnap_ec_data*)data)->temp_ids[channel] == 11)
+          // Check if this channel is valid
+          if (qnap_ec_is_temp_channel_valid((struct qnap_ec_data*)data, channel) == 1)
           {
-            return 0;
+            // Make the temperature input read only
+            return S_IRUGO;
           }
 
-          // Make the temperature input read only
-          return S_IRUGO;
+          return 0;
         default:
           return 0;
       }
@@ -384,14 +418,12 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
   }
 }
 
+// Function called to read from a hwmon attribute
 static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types type, u32 attribute,
                               int channel, long* value)
 {
   // Declare and/or define needed variables
   struct qnap_ec_data* data = dev_get_drvdata(device);
-
-  // Get the helper mutex lock
-  mutex_lock(&qnap_ec_helper_mutex);
 
   // Switch based on the sensor type
   // Note: we are using a switch statement to simplify possible future expansion
@@ -402,13 +434,23 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_fan_input:
-          // Set the I/O control command structure fields
+          // Check if this channel is invalid
+          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 1)
+          {
+            return -EOPNOTSUPP;
+          }
+
+          // Get the data mutex lock
+          mutex_lock(&data->mutex);
+
+          // Set the I/O control command structure fields for calling the ec_sys_get_fan_speed
+          //   function in the libuLinux_hal library the helper program
           // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
           //       on the FIELD_SIZEOF macro which was removed from the kernel
           data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
           strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_speed",
             sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint8 = data->fan_ids[channel];
+          data->ioctl_command.argument1_uint8 = channel;
           data->ioctl_command.argument2_uint32 = 0;
 
           break;
@@ -421,13 +463,23 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_pwm_input:
-          // Set the I/O control command structure fields
+          // Check if this channel is invalid
+          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 1)
+          {
+            return -EOPNOTSUPP;
+          }
+
+          // Get the data mutex lock
+          mutex_lock(&data->mutex);
+
+          // Set the I/O control command structure fields for calling the ec_sys_get_fan_pwm
+          //   function in the libuLinux_hal library the helper program
           // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
           //       on the FIELD_SIZEOF macro which was removed from the kernel
           data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
           strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
             sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint8 = data->pwm_ids[channel];
+          data->ioctl_command.argument1_uint8 = channel;
           data->ioctl_command.argument2_uint32 = 0;
 
           break;
@@ -440,7 +492,17 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_temp_input:
-          // Set the I/O control command structure fields
+          // Check if this channel is invalid
+          if (qnap_ec_is_temp_channel_valid(data, channel) != 1)
+          {
+            return -EOPNOTSUPP;
+          }
+
+          // Get the data mutex lock
+          mutex_lock(&data->mutex);
+
+          // Set the I/O control command structure fields for calling the ec_sys_get_temperature
+          //   function in the libuLinux_hal library via the helper program
           // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
           //       on the FIELD_SIZEOF macro which was removed from the kernel
           // Note: we are using an int64 field in place of a double field since floating point
@@ -448,7 +510,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           data->ioctl_command.function_type = int8_func_uint8_doublepointer;
           strncpy(data->ioctl_command.function_name, "ec_sys_get_temperature",
             sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint8 = data->temp_ids[channel];
+          data->ioctl_command.argument1_uint8 = channel;
           data->ioctl_command.argument2_int64 = 0;
 
           break;
@@ -460,31 +522,34 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       return -EOPNOTSUPP;
   }
 
-  // Set the open device flag to allow communication
-  data->open_device = 1;
+  // Set the open device flag to allow return communication by the helper program
+  data->devices->open_misc_device = 1;
 
   // Call the helper program
-  if (qnap_ec_call_helper() != 0)
+  if (qnap_ec_call_helper(1) != 0)
   {
-    // Release the helper mutex lock
-    mutex_unlock(&qnap_ec_helper_mutex);
+    // Clear the open device flag
+    data->devices->open_misc_device = 0;
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
 
     return -ENODATA;
   }
 
   // Clear the open device flag
-  data->open_device = 0;
+  data->devices->open_misc_device = 0;
 
   // Check if the called function returned any errors
   if (data->ioctl_command.return_value_int8 != 0)
   {
     // Log the error
     printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
-      "a non zero value of %i", data->ioctl_command.function_name,
+      "a non zero value (%i)", data->ioctl_command.function_name,
       data->ioctl_command.return_value_int8);
 
-    // Release the helper mutex lock
-    mutex_unlock(&qnap_ec_helper_mutex);
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
 
     return -ENODATA;
   }
@@ -499,7 +564,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_fan_input:
-          // Set the value to the correct returned value
+          // Set the value to the returned fan speed value
           *value = data->ioctl_command.argument2_uint32;
 
           break;
@@ -510,7 +575,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_pwm_input:
-          // Set the value to the correct returned value
+          // Set the value to the returned fan PWM value
           *value = data->ioctl_command.argument2_uint32;
 
           break;
@@ -521,7 +586,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_temp_input:
-          // Set the value to the correct returned value
+          // Set the value to the returned temperature value
           // Note: we are using an int64 field instead of a double field because floating point
           //       math is not possible in kernel space and because an int64 value can hold a 19
           //       digit integer while a double value can hold a 16 digit integer without loosing
@@ -540,20 +605,18 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       break;
   }
 
-  // Release the helper mutex lock
-  mutex_unlock(&qnap_ec_helper_mutex);
+  // Release the data mutex lock
+  mutex_unlock(&data->mutex);
 
   return 0;
 }
 
+// Function called to write to a hwmon atrribute
 static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value)
 {
   // Declare and/or define needed variables
   struct qnap_ec_data* data = dev_get_drvdata(device);
-
-  // Get the helper mutex lock
-  mutex_lock(&qnap_ec_helper_mutex);
 
   // Switch based on the sensor type
   // Note: we are using a switch statement to simplify possible future expansion
@@ -564,61 +627,413 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
       switch (attribute)
       {
         case hwmon_pwm_input:
-          // Set the I/O control command structure fields
+          // Check if this channel is invalid
+          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 1)
+          {
+            return -EOPNOTSUPP;
+          }
+
+          // Get the data mutex lock
+          mutex_lock(&data->mutex);
+
+          // Set the I/O control command structure fields for calling the ec_sys_set_fan_speed
+          //   function in the libuLinux_hal library via the helper program
           // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
           //       on the FIELD_SIZEOF macro which was removed from the kernel
           data->ioctl_command.function_type = int8_func_uint8_uint8;
           strncpy(data->ioctl_command.function_name, "ec_sys_set_fan_speed",
             sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint8 = data->fan_ids[channel];
+          data->ioctl_command.argument1_uint8 = channel;
           data->ioctl_command.argument2_uint8 = value;
 
-          return 0;
+          break;
         default:
           return -EOPNOTSUPP;
       }
+      break;
     default:
       return -EOPNOTSUPP;
   }
 
-  // Set the open device flag to allow communication
-  data->open_device = 1;
+  // Set the open device flag to allow return communication by the helper program
+  data->devices->open_misc_device = 1;
 
   // Call the helper program
-  if (qnap_ec_call_helper() != 0)
+  if (qnap_ec_call_helper(1) != 0)
   {
-    // Release the helper mutex lock
-    mutex_unlock(&qnap_ec_helper_mutex);
+    // Clear the open device flag
+    data->devices->open_misc_device = 0;
 
-    return -ENODATA;
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    // Note: the "bad exchange" error code seems to be the closest code to describe this error
+    //       condition (ie: the exchange of information between the kernel module and the helper
+    //       program went bad)
+    return -EBADE;
   }
 
   // Clear the open device flag
-  data->open_device = 0;
+  data->devices->open_misc_device = 0;
 
   // Check if the called function returned any errors
   if (data->ioctl_command.return_value_int8 != 0)
   {
     // Log the error
     printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
-      "a non zero value of %i", data->ioctl_command.function_name,
+      "a non zero value (%i)", data->ioctl_command.function_name,
       data->ioctl_command.return_value_int8);
 
-    // Release the helper mutex lock
-    mutex_unlock(&qnap_ec_helper_mutex);
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    // Note: the "bad exchange" error code seems to be the closest code to describe this error
+    //       condition (ie: the exchange of information between the kernel module and the helper
+    //       program went bad)
+    return -EBADE;
+  }
+
+  // Release the data mutex lock
+  mutex_unlock(&data->mutex);
+
+  return 0;
+}
+
+// Function called to check if the fan or PWM channel number is valid
+// Note: the return value is 1 if the channel is valid, 0 if the channel is invalid, and a
+//       negative value if an error occurred
+static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int channel)
+{
+  // Note: based on testing the logic for determining if a fan or PWM channel is valid is:
+  //       - if channel is 10 or 11 then channel is invalid
+  //       - call ec_sys_get_fan_status function in the libuLinux_hal library
+  //       - if the function return value is non zero then the channel is invalid
+  //       - if the returned fan status value is non zero then the channel is invalid
+  //       - call ec_sys_get_fan_speed function in the libuLinux_hal library
+  //       - if the function return value is non zero then the channel is invalid
+  //       - if the returned fan speed value is 65535 then the channel is invalid
+  //       - call ec_sys_get_fan_pwm function in the libuLinux_hal library
+  //       - if the function return value is non zero then the channel is invalid
+  //       - if the returned fan PWM value is 650 then the channel is invalid
+
+  // Check if this channel has already been checked
+  if (((data->fan_or_pwm_channel_checked_field >> channel) & 0x01) == 1)
+  {
+    return (data->fan_or_pwm_channel_valid_field >> channel) & 0x01;
+  }
+
+  // Get the data mutex lock
+  mutex_lock(&data->mutex);
+
+  // Check if the channel number is 10 or 11 which are only valid for units with redundant power
+  //   supplies and cause the libuLinux_hal library functions to fail to execute when retrieving
+  //   data for these channels
+  if (channel == 10 || channel == 11)
+  {
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Set the I/O control command structure fields for calling the ec_sys_get_fan_status function
+  //   in the libuLinux_hal library via the helper program
+  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
+  //       FIELD_SIZEOF macro which was removed from the kernel
+  data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
+  strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_status",
+    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
+  data->ioctl_command.argument1_uint8 = channel;
+  data->ioctl_command.argument2_uint32 = 0;
+
+  // Set the open device flag to allow return communication by the helper program
+  data->devices->open_misc_device = 1;
+
+  // Call the helper program
+  if (qnap_ec_call_helper(0) != 0)
+  {
+    // Clear the open device flag
+    data->devices->open_misc_device = 0;
+
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
 
     return -ENODATA;
   }
 
-  // Release the helper mutex lock
-  mutex_unlock(&qnap_ec_helper_mutex);
+  // Clear the open device flag
+  data->devices->open_misc_device = 0;
+
+  // Check if the called function return value is non zero
+  if (data->ioctl_command.return_value_int8 != 0)
+  {
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Check if the returned status value is non zero
+  if (data->ioctl_command.argument2_uint32 != 0)
+  {
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Set the I/O control command structure fields for calling the ec_sys_get_fan_speed function
+  //   in the libuLinux_hal library via the helper program
+  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
+  //       FIELD_SIZEOF macro which was removed from the kernel
+  data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
+  strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_speed",
+    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
+  data->ioctl_command.argument1_uint8 = channel;
+  data->ioctl_command.argument2_uint32 = 0;
+
+  // Set the open device flag to allow return communication by the helper program
+  data->devices->open_misc_device = 1;
+
+  // Call the helper program
+  if (qnap_ec_call_helper(0) != 0)
+  {
+    // Clear the open device flag
+    data->devices->open_misc_device = 0;
+
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return -ENODATA;
+  }
+
+  // Clear the open device flag
+  data->devices->open_misc_device = 0;
+
+  // Check if the called function return value is non zero
+  if (data->ioctl_command.return_value_int8 != 0)
+  {
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Check if the returned fan speed value is 65535
+  if (data->ioctl_command.argument2_uint32 == 65535)
+  {
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Set the I/O control command structure fields for calling the ec_sys_get_fan_pwm function
+  //   in the libuLinux_hal library via the helper program
+  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
+  //       FIELD_SIZEOF macro which was removed from the kernel
+  data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
+  strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
+    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
+  data->ioctl_command.argument1_uint8 = channel;
+  data->ioctl_command.argument2_uint32 = 0;
+
+  // Set the open device flag to allow return communication by the helper program
+  data->devices->open_misc_device = 1;
+
+  // Call the helper program
+  if (qnap_ec_call_helper(0) != 0)
+  {
+    // Clear the open device flag
+    data->devices->open_misc_device = 0;
+
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return -ENODATA;
+  }
+
+  // Clear the open device flag
+  data->devices->open_misc_device = 0;
+
+  // Check if the called function return value is non zero
+  if (data->ioctl_command.return_value_int8 != 0)
+  {
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Check if the returned fan PWM value is 650
+  if (data->ioctl_command.argument2_uint32 == 650)
+  {
+    // Mark this channel as checked and invalid
+    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Mark this channel as checked and valid
+  data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+  data->fan_or_pwm_channel_valid_field |= ((uint64_t)0x01 << channel);
+
+  // Release the data mutex lock
+  mutex_unlock(&data->mutex);
+
+  return 1;
+}
+
+// Function called to check if the temperature channel number is valid
+// Note: the return value is 1 if the channel is valid, 0 if the channel is invalid, and a
+//       negative value if an error occurred
+static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
+{
+  // Note: based on testing the logic for determining if a temperature channel is valid is:
+  //       - if channel is 10 or 11 then channel is invalid
+  //       - call ec_sys_get_temperature function in the libuLinux_hal library
+  //       - if the function return value is non zero then the channel is invalid
+  //       - if the returned temperature value is negative then the channel is invalid
+
+  // Check if this channel has already been checked
+  if (((data->temp_channel_checked_field >> channel) & 0x01) == 1)
+  {
+    return (data->temp_channel_valid_field >> channel) & 0x01;
+  }
+
+  // Get the data mutex lock
+  mutex_lock(&data->mutex);
+
+  // Check if the channel number is 10 or 11 which are only valid for units with redundant power
+  //   supplies and cause the libuLinux_hal library functions to fail to execute when retrieving
+  //   data for these channels
+  if (channel == 10 || channel == 11)
+  {
+    // Mark this channel as checked and invalid
+    data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->temp_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Set the I/O control command structure fields for calling the ec_sys_get_temperature function
+  //   in the libuLinux_hal library via the helper program
+  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
+  //       FIELD_SIZEOF macro which was removed from the kernel
+  // Note: we are using an int64 field in place of a double field since floating point math is not
+  //       possible in kernel space
+  data->ioctl_command.function_type = int8_func_uint8_doublepointer;
+  strncpy(data->ioctl_command.function_name, "ec_sys_get_temperature",
+    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
+  data->ioctl_command.argument1_uint8 = channel;
+  data->ioctl_command.argument2_int64 = 0;
+
+  // Set the open device flag to allow return communication by the helper program
+  data->devices->open_misc_device = 1;
+
+  // Call the helper program
+  if (qnap_ec_call_helper(0) != 0)
+  {
+    // Clear the open device flag
+    data->devices->open_misc_device = 0;
+
+    // Mark this channel as checked and invalid
+    data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->temp_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return -ENODATA;
+  }
+
+  // Clear the open device flag
+  data->devices->open_misc_device = 0;
+
+  // Check if the called function return value is non zero
+  if (data->ioctl_command.return_value_int8 != 0)
+  {
+    // Mark this channel as checked and invalid
+    data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->temp_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Check if the returned temperature value is negative
+  if (data->ioctl_command.argument2_int64 < 0)
+  {
+    // Mark this channel as checked and invalid
+    data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
+    data->temp_channel_valid_field &= ~((uint64_t)0x01 << channel);
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return 0;
+  }
+
+  // Mark this channel as checked and as valid
+  data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
+  data->temp_channel_valid_field |= ((uint64_t)0x01 << channel);
+
+  // Release the data mutex lock
+  mutex_unlock(&data->mutex);
+
+  return 1;
 }
 
 // Function called to call the user space helper program
-// Note: the return value contains the call_usermodehelper error code (if any) in the first
-//       8 bytes of the return value and the user space helper program error code (if any)
-//       in the next 8 bytes
-static int qnap_ec_call_helper()
+// Note: the return value is the call_usermodehelper function's error code if an error code was
+//       returned or if successful the return value is the user space helper program's error code
+//       if an error code was returned or if successful the return value is zero
+static int qnap_ec_call_helper(uint8_t log_error)
 {
   // Declare and/or define needed variables
   int return_value;
@@ -657,10 +1072,12 @@ static int qnap_ec_call_helper()
             return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
             if ((return_value & 0xFF) != 0)
             {
+              // Log the error
               printk(KERN_ERR "qnap-ec helper program not found in the expected path "
                 "(/usr/local/sbin) or any of the fall back paths (/usr/local/bin;/usr/sbin;"
                 "/usr/bin;/sbin;/bin)");
 
+              // Return the call_usermodehelper function's error code
               return return_value & 0xFF;
             }    
           }    
@@ -669,13 +1086,18 @@ static int qnap_ec_call_helper()
     }    
   }
 
-  // Check if the helper program return value stored in the second 8 bits of the return value
-  //   contain any error codes
+  // Check if the user space helper program's return value stored in the second 8 bits of the
+  //   return value contain any error codes
   if (((return_value >> 8) & 0xFF) != 0)
   {
-    printk(KERN_ERR "qnap-ec helper program exited with a non zero exit code (%i)",
-      ((return_value >> 8) & 0xFF));
+    // Log the error
+    if (log_error)
+    {
+      printk(KERN_ERR "qnap-ec helper program exited with a non zero exit code (%i)",
+        ((return_value >> 8) & 0xFF));
+    }
 
+    // Return the user space helper program's error code
     return (return_value >> 8) & 0xFF;
   }
   
@@ -686,23 +1108,19 @@ static int qnap_ec_call_helper()
 static int qnap_ec_misc_device_open(struct inode* inode, struct file* file)
 {
   // Declare and/or define needed variables
-  // Note: the following statement is a combination of the following two statements
-  //       struct qnap_ec_devices* devices = container_of(file->private_data,
-  //         struct qnap_ec_devices, misc_device);
-  //       struct qnap_ec_data* data = dev_get_drvdata(&devices->plat_device->dev);
-  struct qnap_ec_data* data = dev_get_drvdata(&container_of(file->private_data,
-    struct qnap_ec_devices, misc_device)->plat_device->dev);
+  struct qnap_ec_devices* devices = container_of(file->private_data, struct qnap_ec_devices,
+    misc_device);
 
   // Check if the open device flag is not set which means we are not expecting any communications
-  if (data->open_device == 0)
+  if (devices->open_misc_device == 0)
   {
     return -EBUSY;
   }
 
-  // Try to lock the character device mutex if it's currently unlocked
+  // Try to lock the miscellaneous device mutex if it's currently unlocked
   // Note: if the mutex is currently locked it means we are already communicating and this is an
   //       unexpected communication
-  if (mutex_trylock(&qnap_ec_misc_device_mutex) == 0)
+  if (mutex_trylock(&devices->misc_device_mutex) == 0)
   {
     return -EBUSY;
   }
@@ -765,8 +1183,12 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
 // Function called when the miscellaneous device is released
 static int qnap_ec_misc_device_release(struct inode* inode, struct file* file)
 {
-  // Release the character device mutex lock
-  mutex_unlock(&qnap_ec_misc_device_mutex);
+  // Declare and/or define needed variables
+  struct qnap_ec_devices* devices = container_of(file->private_data, struct qnap_ec_devices,
+    misc_device);
+
+  // Release the miscellaneous device mutex lock
+  mutex_unlock(&devices->misc_device_mutex);
 
   return 0;
 }

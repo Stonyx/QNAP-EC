@@ -18,12 +18,15 @@
 // Note: these function types are based on function signatures in the libuLinux_hal.so library
 //       as decompiled by Ghidra (where int is 4 bytes long, uint4 is 4 bytes long, undefined4 is
 //       4 bytes long and assumed unsigned, and double is 8 bytes long):
+//       int ec_sys_get_fan_status(int param_1, uint* param_2)
 //       int ec_sys_get_fan_speed(int param_1, uint* param_2)
 //       int ec_sys_get_fan_pwm(undefined4 param_1, int* param_2)
 //       int ec_sys_get_temperature(int param_1, double*param_2)
 //       int ec_sys_set_fan_speed(undefined4 param_1, int param_2)
 //       and as decompiled by IDA (where all by the first two arguments are assumed to be local
 //       variable assignments):
+//       __int64 __fastcall ec_sys_get_fan_status(int a1, _DWORD *a2, __int64 a3, __int64 a4,
+//                                                __int64 a5, int a6)
 //       __int64 __fastcall ec_sys_get_fan_speed(int a1, _DWORD *a2, __int64 a3, __int64 a4,
 //                                               int a5, int a6)
 //       __int64 __fastcall ec_sys_get_fan_pwm(int a1, _DWORD *a2, __int64 a3, __int64 a4, int a5,
@@ -32,10 +35,10 @@
 //                                                 int a5, int a6)
 //       __int64 __fastcall ec_sys_set_fan_speed(int a1, int a2, __int64 a3, __int64 a4, int a5,
 //                                               int a6)
-//       and on trial and error testing of various function signatures where it was determined
-//       that the IDA decompiled versions are closest to the correct function signatures if int
-//       is assumed to be 1 byte long and unsigned and the return type is changed to an int that
-//       is 1, 2, or 4 bytes long
+//       and on testing of various function signatures where it was determined that the IDA
+//       decompiled versions are closest to the correct function signatures if int is assumed to
+//       be 1 byte long and unsigned and the return type is changed to an int that is 1, 2, or 4
+//       bytes long
 enum qnap_ec_ioctl_function_type {
   int8_func_uint8_uint32pointer,
   int8_func_uint8_doublepointer,
