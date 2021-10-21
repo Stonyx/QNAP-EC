@@ -371,7 +371,7 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       {
         case hwmon_fan_input:
           // Check if this channel is valid
-          if (qnap_ec_is_fan_or_pwm_channel_valid((struct qnap_ec_data*)data, channel) == 1)
+          if (qnap_ec_is_fan_or_pwm_channel_valid((struct qnap_ec_data*)data, channel) == 0)
           {
             // Make the fan input read only
             return S_IRUGO;
@@ -387,7 +387,7 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       {
         case hwmon_pwm_input:
           // Check if this channel is valid
-          if (qnap_ec_is_fan_or_pwm_channel_valid((struct qnap_ec_data*)data, channel) == 1)
+          if (qnap_ec_is_fan_or_pwm_channel_valid((struct qnap_ec_data*)data, channel) == 0)
           {
             // Make the PWM input read/write
             return S_IRUGO | S_IWUSR;
@@ -403,7 +403,7 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       {
         case hwmon_temp_input:
           // Check if this channel is valid
-          if (qnap_ec_is_temp_channel_valid((struct qnap_ec_data*)data, channel) == 1)
+          if (qnap_ec_is_temp_channel_valid((struct qnap_ec_data*)data, channel) == 0)
           {
             // Make the temperature input read only
             return S_IRUGO;
@@ -435,7 +435,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_fan_input:
           // Check if this channel is invalid
-          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 1)
+          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
           {
             return -EOPNOTSUPP;
           }
@@ -464,7 +464,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_pwm_input:
           // Check if this channel is invalid
-          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 1)
+          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
           {
             return -EOPNOTSUPP;
           }
@@ -493,7 +493,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_temp_input:
           // Check if this channel is invalid
-          if (qnap_ec_is_temp_channel_valid(data, channel) != 1)
+          if (qnap_ec_is_temp_channel_valid(data, channel) != 0)
           {
             return -EOPNOTSUPP;
           }
@@ -628,7 +628,7 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
       {
         case hwmon_pwm_input:
           // Check if this channel is invalid
-          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 1)
+          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
           {
             return -EOPNOTSUPP;
           }
@@ -700,8 +700,8 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
 }
 
 // Function called to check if the fan or PWM channel number is valid
-// Note: the return value is 1 if the channel is valid, 0 if the channel is invalid, and a
-//       negative value if an error occurred
+// Note: the return value is 0 if the channel is valid, a positive value if the channel is
+//       invalid, and a negative value if an error occurred
 static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int channel)
 {
   // Note: based on testing the logic for determining if a fan or PWM channel is valid is:
@@ -715,11 +715,21 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   //       - call ec_sys_get_fan_pwm function in the libuLinux_hal library
   //       - if the function return value is non zero then the channel is invalid
   //       - if the returned fan PWM value is 650 then the channel is invalid
+  // Note: the bitfields use 0 to represent not checked or invalid and 1 to represent checked or
+  //       valid while the function returns a value of 0 to represnt valid and a value of 1 to
+  //       represent invalid to better conform with the majority of C functions that return a
+  //       value of 0 to signal that everything is correct
 
   // Check if this channel has already been checked
   if (((data->fan_or_pwm_channel_checked_field >> channel) & 0x01) == 1)
   {
-    return (data->fan_or_pwm_channel_valid_field >> channel) & 0x01;
+    // Check if this channel is valid
+    if (((data->fan_or_pwm_channel_valid_field >> channel) & 0x01) == 1)
+    {
+      return 0;
+    }
+
+    return 1;
   }
 
   // Get the data mutex lock
@@ -737,7 +747,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Set the I/O control command structure fields for calling the ec_sys_get_fan_status function
@@ -782,7 +792,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Check if the returned status value is non zero
@@ -795,7 +805,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Set the I/O control command structure fields for calling the ec_sys_get_fan_speed function
@@ -840,7 +850,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Check if the returned fan speed value is 65535
@@ -853,7 +863,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Set the I/O control command structure fields for calling the ec_sys_get_fan_pwm function
@@ -898,7 +908,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Check if the returned fan PWM value is 650
@@ -911,7 +921,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Mark this channel as checked and valid
@@ -921,12 +931,12 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   // Release the data mutex lock
   mutex_unlock(&data->mutex);
 
-  return 1;
+  return 0;
 }
 
 // Function called to check if the temperature channel number is valid
-// Note: the return value is 1 if the channel is valid, 0 if the channel is invalid, and a
-//       negative value if an error occurred
+// Note: the return value is 0 if the channel is valid, a positive value if the channel is
+//       invalid, and a negative value if an error occurred
 static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
 {
   // Note: based on testing the logic for determining if a temperature channel is valid is:
@@ -934,12 +944,22 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   //       - call ec_sys_get_temperature function in the libuLinux_hal library
   //       - if the function return value is non zero then the channel is invalid
   //       - if the returned temperature value is negative then the channel is invalid
+  // Note: the bitfields use 0 to represent not checked or invalid and 1 to represent checked or
+  //       valid while the function returns a value of 0 to represnt valid and a value of 1 to
+  //       represent invalid to better conform with the majority of C functions that return a
+  //       value of 0 to signal that everything is correct
 
   // Check if this channel has already been checked
   if (((data->temp_channel_checked_field >> channel) & 0x01) == 1)
   {
-    return (data->temp_channel_valid_field >> channel) & 0x01;
-  }
+    // Check if this channel is valid
+    if (((data->temp_channel_valid_field >> channel) & 0x01) == 1)
+    {
+      return 0;
+    }
+
+    return 1;
+  }  
 
   // Get the data mutex lock
   mutex_lock(&data->mutex);
@@ -956,7 +976,7 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Set the I/O control command structure fields for calling the ec_sys_get_temperature function
@@ -1003,7 +1023,7 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Check if the returned temperature value is negative
@@ -1016,7 +1036,7 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
-    return 0;
+    return 1;
   }
 
   // Mark this channel as checked and as valid
@@ -1026,7 +1046,7 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   // Release the data mutex lock
   mutex_unlock(&data->mutex);
 
-  return 1;
+  return 0;
 }
 
 // Function called to call the user space helper program
