@@ -704,7 +704,7 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
 //       invalid, and a negative value if an error occurred
 static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int channel)
 {
-  // Note: based on testing the logic for determining if a fan or PWM channel is valid is:
+  // Note: based on testing the logic to determining if a fan or PWM channel is valid is:
   //       - if channel is 10 or 11 then channel is invalid
   //       - call ec_sys_get_fan_status function in the libuLinux_hal library
   //       - if the function return value is non zero then the channel is invalid
@@ -939,7 +939,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
 //       invalid, and a negative value if an error occurred
 static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
 {
-  // Note: based on testing the logic for determining if a temperature channel is valid is:
+  // Note: based on testing the logic to determining if a temperature channel is valid is:
   //       - if channel is 10 or 11 then channel is invalid
   //       - call ec_sys_get_temperature function in the libuLinux_hal library
   //       - if the function return value is non zero then the channel is invalid
