@@ -59,7 +59,7 @@ struct qnap_ec_data {
 
 // Declare functions
 static int __init qnap_ec_init(void);
-static int __init qnap_ec_find(void);
+static int __init qnap_ec_is_chip_present(void);
 static int qnap_ec_probe(struct platform_device* platform_dev);
 static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_types type,
                                         u32 attribute, int channel);
@@ -105,8 +105,8 @@ static int __init qnap_ec_init(void)
     .release = &qnap_ec_misc_device_release
   };
 
-  // Check if we can't find the chip
-  error = qnap_ec_find();
+  // Check if the embedded controll chip isn't present
+  error = qnap_ec_is_chip_present();
   if (error)
   {
     return error;
@@ -216,9 +216,15 @@ static int __init qnap_ec_init(void)
   return 0;
 }
 
-// Function called to find the QNAP embedded controller
-static int __init qnap_ec_find(void)
+// Function called to check if the QNAP embedded controller chip is present
+static int __init qnap_ec_is_chip_present(void)
 {
+#ifdef SKIP_CHECK
+
+  return 0;
+
+#else
+
   // Declare needed variables
   uint8_t byte1;
   uint8_t byte2;
@@ -252,6 +258,8 @@ static int __init qnap_ec_find(void)
   release_region(0x2E, 2);
 
   return 0;
+
+#endif
 }
 
 // Function called to probe this driver
@@ -723,27 +731,26 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   // Check if this channel has already been checked
   if (((data->fan_or_pwm_channel_checked_field >> channel) & 0x01) == 1)
   {
-    // Check if this channel is valid
-    if (((data->fan_or_pwm_channel_valid_field >> channel) & 0x01) == 1)
+    // Check if this channel is invalid
+    if (((data->fan_or_pwm_channel_valid_field >> channel) & 0x01) == 0)
     {
-      return 0;
+      return 1;
     }
 
-    return 1;
+    return 0;
   }
 
   // Get the data mutex lock
   mutex_lock(&data->mutex);
+
+  // Mark this channel as checked
+  data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
 
   // Check if the channel number is 10 or 11 which are only valid for units with redundant power
   //   supplies and cause the libuLinux_hal library functions to fail to execute when retrieving
   //   data for these channels
   if (channel == 10 || channel == 11)
   {
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -769,10 +776,6 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Clear the open device flag
     data->devices->open_misc_device = 0;
 
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -785,10 +788,6 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   // Check if the called function return value is non zero
   if (data->ioctl_command.return_value_int8 != 0)
   {
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -798,10 +797,6 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   // Check if the returned status value is non zero
   if (data->ioctl_command.argument2_uint32 != 0)
   {
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -827,10 +822,6 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Clear the open device flag
     data->devices->open_misc_device = 0;
 
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -843,10 +834,6 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   // Check if the called function return value is non zero
   if (data->ioctl_command.return_value_int8 != 0)
   {
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -856,10 +843,6 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   // Check if the returned fan speed value is 65535
   if (data->ioctl_command.argument2_uint32 == 65535)
   {
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -885,10 +868,6 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
     // Clear the open device flag
     data->devices->open_misc_device = 0;
 
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -901,10 +880,6 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   // Check if the called function return value is non zero
   if (data->ioctl_command.return_value_int8 != 0)
   {
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -914,18 +889,13 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   // Check if the returned fan PWM value is 650
   if (data->ioctl_command.argument2_uint32 == 650)
   {
-    // Mark this channel as checked and invalid
-    data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->fan_or_pwm_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
     return 1;
   }
 
-  // Mark this channel as checked and valid
-  data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+  // Mark this channel as valid
   data->fan_or_pwm_channel_valid_field |= ((uint64_t)0x01 << channel);
 
   // Release the data mutex lock
@@ -952,27 +922,26 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   // Check if this channel has already been checked
   if (((data->temp_channel_checked_field >> channel) & 0x01) == 1)
   {
-    // Check if this channel is valid
-    if (((data->temp_channel_valid_field >> channel) & 0x01) == 1)
+    // Check if this channel is invalid
+    if (((data->temp_channel_valid_field >> channel) & 0x01) == 0)
     {
-      return 0;
+      return 1;
     }
 
-    return 1;
+    return 0;
   }  
 
   // Get the data mutex lock
   mutex_lock(&data->mutex);
+
+  // Mark this channel as checked
+  data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
 
   // Check if the channel number is 10 or 11 which are only valid for units with redundant power
   //   supplies and cause the libuLinux_hal library functions to fail to execute when retrieving
   //   data for these channels
   if (channel == 10 || channel == 11)
   {
-    // Mark this channel as checked and invalid
-    data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->temp_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -1000,10 +969,6 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
     // Clear the open device flag
     data->devices->open_misc_device = 0;
 
-    // Mark this channel as checked and invalid
-    data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->temp_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -1016,10 +981,6 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   // Check if the called function return value is non zero
   if (data->ioctl_command.return_value_int8 != 0)
   {
-    // Mark this channel as checked and invalid
-    data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->temp_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
@@ -1029,18 +990,13 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   // Check if the returned temperature value is negative
   if (data->ioctl_command.argument2_int64 < 0)
   {
-    // Mark this channel as checked and invalid
-    data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
-    data->temp_channel_valid_field &= ~((uint64_t)0x01 << channel);
-
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
 
     return 1;
   }
 
-  // Mark this channel as checked and as valid
-  data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
+  // Mark this channel as valid
   data->temp_channel_valid_field |= ((uint64_t)0x01 << channel);
 
   // Release the data mutex lock

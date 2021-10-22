@@ -37,7 +37,7 @@
 //                                               int a6)
 //       and on testing of various function signatures where it was determined that the IDA
 //       decompiled versions are closest to the correct function signatures if int is assumed to
-//       be 1 byte long and unsigned and the return type is changed to an int that is 1, 2, or 4
+//       be 1 byte long and unsigned and the return type is changed to a int that is 1, 2, or 4
 //       bytes long
 enum qnap_ec_ioctl_function_type {
   int8_func_uint8_uint32pointer,
