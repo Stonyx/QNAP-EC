@@ -67,7 +67,7 @@ install: module helper
 	$(MODPROBE_COMMAND) $(MODULE_NAME)
 
 uninstall:
-	$(MODPROBE_COMMAND) --remove $(MODULE_NAME)
+	$(MODPROBE_COMMAND) --remove --quiet $(MODULE_NAME)
 	$(RM) --recursive $(MODULE_PATH)
 	$(DEPMOD_COMMAND) --all
 	$(RM) $(HELPER_PATH)/$(HELPER_BINARY_FILE)

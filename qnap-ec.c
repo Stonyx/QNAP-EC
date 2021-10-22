@@ -378,14 +378,8 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       switch (attribute)
       {
         case hwmon_fan_input:
-          // Check if this channel is valid
-          if (qnap_ec_is_fan_or_pwm_channel_valid((struct qnap_ec_data*)data, channel) == 0)
-          {
-            // Make the fan input read only
-            return S_IRUGO;
-          }
-
-          return 0;
+          // Make the fan input read only
+          return S_IRUGO;
         default:
           return 0;
       }
@@ -394,14 +388,8 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       switch (attribute)
       {
         case hwmon_pwm_input:
-          // Check if this channel is valid
-          if (qnap_ec_is_fan_or_pwm_channel_valid((struct qnap_ec_data*)data, channel) == 0)
-          {
-            // Make the PWM input read/write
-            return S_IRUGO | S_IWUSR;
-          }
-
-          return 0;
+          // Make the PWM input read/write
+          return S_IRUGO | S_IWUSR;
         default:
           return 0;
       }
@@ -410,14 +398,8 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       switch (attribute)
       {
         case hwmon_temp_input:
-          // Check if this channel is valid
-          if (qnap_ec_is_temp_channel_valid((struct qnap_ec_data*)data, channel) == 0)
-          {
-            // Make the temperature input read only
-            return S_IRUGO;
-          }
-
-          return 0;
+          // Make the temperature input read only
+          return S_IRUGO;
         default:
           return 0;
       }
@@ -445,7 +427,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Check if this channel is invalid
           if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
           {
-            return -EOPNOTSUPP;
+            return -ENODATA;
           }
 
           // Get the data mutex lock
@@ -474,7 +456,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Check if this channel is invalid
           if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
           {
-            return -EOPNOTSUPP;
+            return -ENODATA;
           }
 
           // Get the data mutex lock
@@ -503,7 +485,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Check if this channel is invalid
           if (qnap_ec_is_temp_channel_valid(data, channel) != 0)
           {
-            return -EOPNOTSUPP;
+            return -ENODATA;
           }
 
           // Get the data mutex lock

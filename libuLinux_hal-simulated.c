@@ -73,6 +73,7 @@ int8_t ec_sys_get_fan_speed(uint8_t channel, uint32_t* speed)
   {
     case 0:
       *speed = 651;
+      return 0;
     case 1:
       *speed = 661;
       return 0;
