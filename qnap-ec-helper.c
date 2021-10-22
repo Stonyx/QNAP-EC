@@ -19,7 +19,6 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <stdio.h>
 #include <syslog.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -168,8 +167,6 @@ int main(int argc, char** argv)
     closelog();
     exit(EXIT_FAILURE);
   }
-
-  syslog(LOG_INFO, "no errors in helper");
 
   // Close the libuLinux_hal library
   dlclose(library);
