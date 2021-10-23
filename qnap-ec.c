@@ -35,15 +35,15 @@ MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
 
 // Define the devices structure
-// Note: in order to use the platform_device_alloc function (see note in the qnap_ec_init
-//       function) we need to make the plat_device member a pointer and in order to use the
-//       container_of macro in the qnap_ec_misc_dev_open and qnap_ec_misc_dev_ioctl functions
-//       we need to make the misc_device member not a pointer
+// Note: in order to use the container_of macro in the qnap_ec_misc_dev_open and 
+//       qnap_ec_misc_dev_ioctl functions we need to make the misc_device member not a pointer
+//       and in order to use the platform_device_alloc function (see note in the qnap_ec_init
+//       function) we need to make the plat_device member a pointer
 struct qnap_ec_devices {
-  struct platform_device* plat_device;
   struct mutex misc_device_mutex;
   uint8_t open_misc_device;
   struct miscdevice misc_device;
+  struct platform_device* plat_device;
 };
 
 // Define the I/O control data structure
@@ -61,7 +61,7 @@ struct qnap_ec_data {
 static int __init qnap_ec_init(void);
 static int __init qnap_ec_is_chip_present(void);
 static int qnap_ec_probe(struct platform_device* platform_dev);
-static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_types type,
+static umode_t qnap_ec_hwmon_is_visible(const void* const_data, enum hwmon_sensor_types type,
                                         u32 attribute, int channel);
 static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, u32 attribute,
                               int channel, long* value);
@@ -145,6 +145,33 @@ static int __init qnap_ec_init(void)
     return -ENOMEM;
   }
 
+  // Initialize the miscellaneous device mutex
+  mutex_init(&qnap_ec_devices->misc_device_mutex);
+
+  // Populate various miscellaneous device structure fields
+  qnap_ec_devices->misc_device.name = "qnap-ec";
+  qnap_ec_devices->misc_device.minor = MISC_DYNAMIC_MINOR;
+  qnap_ec_devices->misc_device.fops = &misc_device_file_ops;
+
+  // Register the miscellaneous device
+  // Note: we need to register the miscellaneous device before registering the platform device so
+  //       that the miscellaneous device is available for use by the various functions called by
+  //       the probe function which is called when the platform device is registered
+  error = misc_register(&qnap_ec_devices->misc_device);
+  if (error)
+  {
+    // Free the devices structure memory
+    kfree(qnap_ec_devices);
+
+    // Unregister the platform driver
+    platform_driver_unregister(qnap_ec_plat_driver);
+
+    // Free the platform driver structure memory
+    kfree(qnap_ec_plat_driver);
+
+    return error;
+  }
+
   // Allocate memory for the platform device structure and populate various fields
   // Note: we are using the platform_device_alloc function in combination with the
   //       platform_device_add function instead of the platform_device_register function because
@@ -153,6 +180,9 @@ static int __init qnap_ec_init(void)
   qnap_ec_devices->plat_device = platform_device_alloc("qnap-ec", 0);
   if (qnap_ec_devices->plat_device == NULL)
   {
+    // Unregister the miscellaneous device
+    misc_deregister(&qnap_ec_devices->misc_device);
+
     // Free the devices structure memory
     kfree(qnap_ec_devices);
 
@@ -174,32 +204,8 @@ static int __init qnap_ec_init(void)
     // Free the platform device structure memory
     platform_device_put(qnap_ec_devices->plat_device);
 
-    // Free the devices structure memory
-    kfree(qnap_ec_devices);
-
-    // Unregister the platform driver
-    platform_driver_unregister(qnap_ec_plat_driver);
-
-    // Free the platform driver structure memory
-    kfree(qnap_ec_plat_driver);
-
-    return error;
-  }
-
-  // Initialize the miscellaneous device mutex
-  mutex_init(&qnap_ec_devices->misc_device_mutex);
-
-  // Populate various miscellaneous device structure fields
-  qnap_ec_devices->misc_device.name = "qnap-ec";
-  qnap_ec_devices->misc_device.minor = MISC_DYNAMIC_MINOR;
-  qnap_ec_devices->misc_device.fops = &misc_device_file_ops;
-
-  // Register the miscellaneous device
-  error = misc_register(&qnap_ec_devices->misc_device);
-  if (error)
-  {
-    // "Unregister" the platform device and free the platform device structure memory
-    platform_device_put(qnap_ec_devices->plat_device);
+    // Unregister the miscellaneous device
+    misc_deregister(&qnap_ec_devices->misc_device);
 
     // Free the devices structure memory
     kfree(qnap_ec_devices);
@@ -350,6 +356,11 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   mutex_init(&data->mutex);
   data->devices = qnap_ec_devices;
 
+  // Set the custom device data to the data structure
+  // Note: this needs to be done before registering the hwmon device so that the data is accessible
+  //       in the qnap_ec_is_visible function which is called when the hwmon device is registered
+  dev_set_drvdata(&platform_dev->dev, data);
+
   // Register the hwmon device and include the data structure
   // Note: hwmon device name cannot contain dashes
   device = devm_hwmon_device_register_with_info(&platform_dev->dev, "qnap_ec", data,
@@ -359,18 +370,21 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
     return -ENOMEM;
   }
 
-  // Set the custom device data to the data structure
-  dev_set_drvdata(&platform_dev->dev, data);
-
   return 0;
 }
 
 // Function called to check if a hwmon attribute is visible
-static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_types type,
+static umode_t qnap_ec_hwmon_is_visible(const void* const_data, enum hwmon_sensor_types type,
                                         u32 attribute, int channel)
 {
+  // Declare and/or define needed variables
+  // Note: we are using the dev_get_drvdata function to get access to the data since we need a
+  //       pointer to non constant data
+  struct qnap_ec_data* data = dev_get_drvdata(&((const struct qnap_ec_data*)const_data)->devices->
+    plat_device->dev);
+
   // Switch based on the sensor type
-  // Note: we are using a switch statement to simplify possible future expansion
+  // Note: we are using a switch statements to simplify possible future expansion
   switch (type)
   {
     case hwmon_fan:
@@ -378,34 +392,50 @@ static umode_t qnap_ec_hwmon_is_visible(const void* data, enum hwmon_sensor_type
       switch (attribute)
       {
         case hwmon_fan_input:
-          // Make the fan input read only
-          return S_IRUGO;
-        default:
-          return 0;
+          // Check if this channel is valid
+          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) == 0)
+          {
+            // Make the fan input read only
+            return S_IRUGO;
+          }
+          break;
       }
+      break;
     case hwmon_pwm:
       // Switch based on the sensor attribute
       switch (attribute)
       {
         case hwmon_pwm_input:
-          // Make the PWM input read/write
-          return S_IRUGO | S_IWUSR;
-        default:
-          return 0;
+          // Check if this channel is valid
+          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) == 0)
+          {
+            // Make the PWM input read/write
+            return S_IRUGO | S_IWUSR;
+          }
+          break;
       }
+      break;
     case hwmon_temp:
       // Switch based on the sensor attribute
       switch (attribute)
       {
         case hwmon_temp_input:
-          // Make the temperature input read only
-          return S_IRUGO;
-        default:
-          return 0;
+          // Check if this channel is valid
+          if (qnap_ec_is_temp_channel_valid(data, channel) == 0)
+          {
+            // Make the temperature input read only
+            return S_IRUGO;
+          }
+          break;
       }
+      break;
+    // Dummy default cause to silence compiler warnings about not including all enums in switch
+    //   statement
     default:
-      return 0;
+      break;
   }
+
+  return 0;
 }
 
 // Function called to read from a hwmon attribute
@@ -416,7 +446,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   struct qnap_ec_data* data = dev_get_drvdata(device);
 
   // Switch based on the sensor type
-  // Note: we are using a switch statement to simplify possible future expansion
+  // Note: we are using a switch statements to simplify possible future expansion
   switch (type)
   {
     case hwmon_fan:
@@ -427,7 +457,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Check if this channel is invalid
           if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
           {
-            return -ENODATA;
+            return -EOPNOTSUPP;
           }
 
           // Get the data mutex lock
@@ -456,7 +486,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Check if this channel is invalid
           if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
           {
-            return -ENODATA;
+            return -EOPNOTSUPP;
           }
 
           // Get the data mutex lock
@@ -485,7 +515,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Check if this channel is invalid
           if (qnap_ec_is_temp_channel_valid(data, channel) != 0)
           {
-            return -ENODATA;
+            return -EOPNOTSUPP;
           }
 
           // Get the data mutex lock
@@ -545,7 +575,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   }
 
   // Switch based on the sensor type
-  // Note: we are using a switch statement to match the switch statement above with the exception
+  // Note: we are using a switch statements to match the switch statement above with the exception
   //       of error cases
   switch (type)
   {
@@ -725,7 +755,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   // Get the data mutex lock
   mutex_lock(&data->mutex);
 
-  // Mark this channel as checked
+  // Mark this channel as checked now so that we don't have to before each return statement
   data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
 
   // Check if the channel number is 10 or 11 which are only valid for units with redundant power
@@ -911,12 +941,12 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
     }
 
     return 0;
-  }  
+  }
 
   // Get the data mutex lock
   mutex_lock(&data->mutex);
 
-  // Mark this channel as checked
+  // Mark this channel as checked now so that we don't have to before each return statement
   data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
 
   // Check if the channel number is 10 or 11 which are only valid for units with redundant power
@@ -1049,9 +1079,11 @@ static int qnap_ec_call_helper(uint8_t log_error)
   if (((return_value >> 8) & 0xFF) != 0)
   {
     // Log the error
+    // Note: the sign (+/-) of the user space helper program's error code is not returned by the
+    //       call_usermodehelper function
     if (log_error)
     {
-      printk(KERN_ERR "qnap-ec helper program exited with a non zero exit code (%i)",
+      printk(KERN_ERR "qnap-ec helper program exited with a non zero exit code (+/-%i)",
         ((return_value >> 8) & 0xFF));
     }
 
@@ -1091,7 +1123,7 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
                                           unsigned long argument)
 {
   // Declare and/or define needed variables
-  // Note: the following statement is a combination of the following two statements
+  // Note: the following statement is a combination of the following two statements:
   //       struct qnap_ec_devices* devices = container_of(file->private_data,
   //         struct qnap_ec_devices, misc_device);
   //       struct qnap_ec_data* data = dev_get_drvdata(&devices->plat_device->dev);
@@ -1115,7 +1147,7 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
         return -EFAULT;
       }
 
-      return 0;
+      break;
     case QNAP_EC_IOCTL_RETURN:
       // Make sure we can read the data from user space
       if (access_ok(argument, sizeof(struct qnap_ec_ioctl_command)) == 0)
@@ -1130,7 +1162,7 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
         return -EFAULT;
       }
 
-      return 0;
+      break;
     default:
       return -EINVAL;
   }
@@ -1154,14 +1186,14 @@ static int qnap_ec_misc_device_release(struct inode* inode, struct file* file)
 // Function called to exit the driver
 static void __exit qnap_ec_exit(void)
 {
-  // Unregister the miscellaneous device
-  misc_deregister(&qnap_ec_devices->misc_device);
-
   // Unregister the platform device and free the platform device structure memory
   // Note: we are using the platform_device_unregister function instead of the platform_device_put
   //       function used in the qnap_ec_init function because all other hwmon drivers take this
   //       approach
   platform_device_unregister(qnap_ec_devices->plat_device);
+
+  // Unregister the miscellaneous device
+  misc_deregister(&qnap_ec_devices->misc_device);
 
   // Free the devices structure memory
   kfree(qnap_ec_devices);

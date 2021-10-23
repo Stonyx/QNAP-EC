@@ -16,6 +16,8 @@
  */
 
 #include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
 
 // Note: this simulation is based on the equavelent functions in the libuLinux_hal library as
 //       decompiled by IDA and on testing done to determine values returned by the actual
@@ -72,10 +74,14 @@ int8_t ec_sys_get_fan_speed(uint8_t channel, uint32_t* speed)
   switch (channel)
   {
     case 0:
-      *speed = 651;
+      // Set speed to a random number between 650 and 660
+      srand(time(NULL) + 1);
+      *speed = rand() % (660 + 1 - 650) + 650;
       return 0;
     case 1:
-      *speed = 661;
+      // Set speed to a random number between 650 and 660
+      srand(time(NULL) + 2);
+      *speed = rand() % (660 + 1 - 650) + 650;
       return 0;
     case 2:
     case 3:
@@ -84,13 +90,16 @@ int8_t ec_sys_get_fan_speed(uint8_t channel, uint32_t* speed)
       *speed = 65535;
       return 0;
     case 6:
-      *speed = 891;
+      // Set speed to a random number between 890 and 900
+      srand(time(NULL) + 3);
+      *speed = rand() % (900 + 1 - 890) + 890;
       return 0;
     case 7:
       *speed = 65535;
       return 0;
     case 10:
     case 11:
+      // Cause a program execution fault on purpose
       *speed = 0;
       *speed = 1 / *speed;
       return 0;
@@ -134,7 +143,7 @@ int8_t ec_sys_get_fan_pwm(uint8_t channel, uint32_t* pwm)
     case 5:
     case 6:
     case 7:
-      *pwm = 76;
+      *pwm = 75;
       return 0;
     case 20:
     case 21:
@@ -142,7 +151,7 @@ int8_t ec_sys_get_fan_pwm(uint8_t channel, uint32_t* pwm)
     case 23:
     case 24:
     case 25:
-      *pwm = 76;
+      *pwm = 75;
       return 0;
     case 30:
     case 31:
@@ -163,22 +172,31 @@ int8_t ec_sys_get_temperature(uint8_t channel, double* temperature)
   switch (channel)
   {
     case 0:
-      *temperature = 29;
+      // Set temperature to a random number between 28 and 30
+      srand(time(NULL) + 4);
+      *temperature = rand() % (30 + 1 - 28) + 28;
       return 0;      
     case 1:
       *temperature = -1;
       return 0;
     case 5:
-      *temperature = 23;
+      // Set temperature to a random number between 23 and 25
+      srand(time(NULL) + 5);
+      *temperature = rand() % (25 + 1 - 23) + 23;
       return 0;
     case 6:
-      *temperature = 25;
+      // Set temperature to a random number between 23 and 25
+      srand(time(NULL) + 6);
+      *temperature = rand() % (25 + 1 - 23) + 23;
       return 0;
     case 7:
-      *temperature = 30;
+      // Set temperature to a random number between 28 and 30
+      srand(time(NULL) + 7);
+      *temperature = rand() % (30 + 1 - 28) + 28;
       return 0;
     case 10:
     case 11:
+      // Cause a program execution fault on purpose
       *temperature = 0;
       *temperature = 1 / *temperature;
       return 0;

@@ -44,6 +44,7 @@ int main(int argc, char** argv)
   device = open("/dev/qnap-ec", O_RDWR);
   if (device < 0)
   {
+    syslog(LOG_ERR, "unable to open qnap-ec device (/dev/qnap-ec)");
     closelog();
     exit(EXIT_FAILURE);
   }
