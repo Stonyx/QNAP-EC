@@ -56,8 +56,8 @@ sim-lib: $(SIM_LIB_C_FILE)
 	$(CC) -o $(SIM_LIB_BINARY_FILE) $^ $(SIM_LIB_CFLAGS)
 
 clean:
-	$(MAKE) -C $(KDIR) M=$(PWD) clean
 	$(RM) $(HELPER_BINARY_FILE)
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
 install: module helper
 	$(INSTALL_COMMAND) $(LIBRARY_SO_FILE) $(LIBRARY_PATH)
@@ -67,7 +67,7 @@ install: module helper
 	$(MODPROBE_COMMAND) $(MODULE_NAME)
 
 uninstall:
-	$(MODPROBE_COMMAND) --remove $(MODULE_NAME)
+	-$(MODPROBE_COMMAND) --remove $(MODULE_NAME)
 	$(RM) --recursive $(MODULE_PATH)
 	$(DEPMOD_COMMAND) --all
 	$(RM) $(HELPER_PATH)/$(HELPER_BINARY_FILE)
