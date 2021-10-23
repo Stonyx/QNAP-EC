@@ -638,6 +638,8 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
   // Declare and/or define needed variables
   struct qnap_ec_data* data = dev_get_drvdata(device);
 
+  printk(KERN_INFO "qnap_ec_hwmon_write called for channel %i", channel);
+
   // Switch based on the sensor type
   // Note: we are using a switch statement to simplify possible future expansion
   switch (type)
@@ -715,6 +717,9 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
 
   // Release the data mutex lock
   mutex_unlock(&data->mutex);
+
+  printk(KERN_INFO "qnap_ec_hwmon_write finished successfully");
+  printk(KERN_INFO "extra message just to flush things to the log");
 
   return 0;
 }
