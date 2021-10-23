@@ -58,6 +58,22 @@ int main(int argc, char** argv)
     exit(EXIT_FAILURE);
   }
 
+  // Open the libuLinux_ini library
+  library = dlopen("/usr/local/lib/libuLinux_ini.so", RTLD_LAZY | RTLD_GLOBAL);
+  if (library == NULL)
+  {
+    // Open the libuLinux_ini library by name only and rely on the path to resolve its path
+    library = dlopen("libuLinux_ini.so", RTLD_LAZY);
+    if (library == NULL)
+    {
+      syslog(LOG_ERR, "libuLinux_ini library not found in the expected path (/usr/local/lib) or "
+        "any of the paths searched in by the dynamic linker");
+      close(device);
+      closelog();
+      exit(EXIT_FAILURE);
+    }
+  }
+
   // Open the libuLinux_hal library
   library = dlopen("/usr/local/lib/libuLinux_hal.so", RTLD_LAZY);
   if (library == NULL)

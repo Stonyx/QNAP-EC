@@ -20,8 +20,10 @@ MODULE_PATH = /lib/modules/$(shell uname -r)/extra/$(MODULE_NAME)
 HELPER_C_FILE = qnap-ec-helper.c
 HELPER_BINARY_FILE = qnap-ec
 HELPER_PATH = /usr/local/sbin
-LIBRARY_SO_FILE = libuLinux_hal.so
-LIBRARY_PATH = /usr/local/lib
+LIBRARY1_SO_FILE = libuLinux_hal.so
+LIBRARY1_PATH = /usr/local/lib
+LIBRARY2_SO_FILE = libuLinux_ini.so
+LIBRARY2_PATH = /usr/local/lib
 SIM_LIB_C_FILE = libuLinux_hal-simulated.c
 SIM_LIB_BINARY_FILE = libuLinux_hal.so
 DEPMOD_COMMAND = $(shell which depmod)
@@ -60,7 +62,8 @@ clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
 install: module helper
-	$(INSTALL_COMMAND) $(LIBRARY_SO_FILE) $(LIBRARY_PATH)
+	$(INSTALL_COMMAND) $(LIBRARY2_SO_FILE) $(LIBRARY2_PATH)
+	$(INSTALL_COMMAND) $(LIBRARY1_SO_FILE) $(LIBRARY1_PATH)
 	$(INSTALL_COMMAND) $(HELPER_BINARY_FILE) $(HELPER_PATH)
 	$(MAKE) -C $(KDIR) M=$(PWD) INSTALL_MOD_DIR=extra/$(MODULE_NAME) modules_install
 	$(DEPMOD_COMMAND) --all
@@ -71,4 +74,5 @@ uninstall:
 	$(RM) --recursive $(MODULE_PATH)
 	$(DEPMOD_COMMAND) --all
 	$(RM) $(HELPER_PATH)/$(HELPER_BINARY_FILE)
-	$(RM) $(LIBRARY_PATH)/$(LIBRARY_SO_FILE)
+	$(RM) $(LIBRARY1_PATH)/$(LIBRARY1_SO_FILE)
+	$(RM) $(LIBRARY2_PATH)/$(LIBRARY2_SO_FILE)
