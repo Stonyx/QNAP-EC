@@ -4,7 +4,7 @@ A Linux hwmon driver kernel module for the QNAP IT8528 Embedded Controller chip 
 
 In order to provide the greatest compatibility, this driver uses a library that is supplied by QNAP in it's NAS operating system.  The libuLinux_hal library that is part of this repository was taken from a QNAP-TS873A model.  In order to ensure proper functionality, you should replace the libuLinux_hal.so library file with one from the operating system image for the exact QNAP NAS model you will be running this driver on.  Because this driver uses the QNAP library it is conceivable that it will work with other chips used by QNAP that are supported by the libuLinux_hal library.
 
-On a vanilla Ubuntu 20.04.2.0 Live DVD system you can build this driver by running the following commands:
+Using a vanilla Ubuntu 20.04.2.0 Live DVD system as an example, you can build this driver by running the following commands:
 ```
 sudo apt install build-essential
 sudo apt install git
