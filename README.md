@@ -26,7 +26,7 @@ This will replace the libuLinux_hal library with the simulated library so that r
 
 To uninstall the module completely run:
 ```
-sudo apt uninstall
+sudo make uninstall
 ```
 
 This driver has three components, the kernel module file called `qnap-ec.ko` which would be installed in the `/lib/modules/5.8.0-43-generic/extra/qnap-ec` directory on a vanilla Ubuntu 20.04.2.0 Live DVD system, the helper program file called `qnap-ec` which would be installed in the `/usr/local/sbin` directory (on a vanilla Ubuntu 20.04.2.0 Live DVD system) and the QNAP library file called `libuLinux_hal.so` which would be installed in the `/usr/local/lib` directory (on a vanilla Ubuntu 20.04.2.0 Live DVD).
