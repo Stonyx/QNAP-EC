@@ -15,10 +15,6 @@
  * Cambridge, MA 02139, USA.
  */
 
-#include <stdint.h>
-#include <stdlib.h>
-#include <time.h>
-
 /*
  * This simulation is based on the equavelent functions in the libuLinux_hal library as decompiled
  * by IDA and on testing done to determine values returned by the actual libuLinux_hal library
@@ -319,6 +315,10 @@
  * ec_sys_get_temperature(38, 0.000000) called as int8_t function(uint8_t, double*):
  * returned = 0, argument 1 after call = 38, argument 2 after call = -1.000000
  */
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
 
 int8_t ec_sys_get_fan_status(uint8_t channel, uint32_t* status)
 {
