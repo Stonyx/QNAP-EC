@@ -6,8 +6,7 @@ In order to provide the greatest compatibility, this driver uses a library that 
 
 Using a vanilla Ubuntu 20.04.2.0 Live DVD system as an example, you can build this driver by running the following commands:
 ```
-sudo apt install build-essential
-sudo apt install git
+sudo apt install build-essential git
 git clone https://github.com/Stonyx/QNAP-EC
 cd QNAP-EC
 sudo make install
