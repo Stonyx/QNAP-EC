@@ -638,8 +638,6 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
   // Declare and/or define needed variables
   struct qnap_ec_data* data = dev_get_drvdata(device);
 
-  printk(KERN_INFO "qnap_ec_hwmon_write called for channel %i", channel);
-
   // Switch based on the sensor type
   // Note: we are using a switch statement to simplify possible future expansion
   switch (type)
@@ -718,9 +716,6 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
   // Release the data mutex lock
   mutex_unlock(&data->mutex);
 
-  printk(KERN_INFO "qnap_ec_hwmon_write finished successfully");
-  printk(KERN_INFO "extra message just to flush things to the log");
-
   return 0;
 }
 
@@ -762,17 +757,6 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
 
   // Mark this channel as checked now so that we don't have to before each return statement
   data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
-
-  // Check if the channel number is 10 or 11 which are only valid for units with redundant power
-  //   supplies and cause the libuLinux_hal library functions to fail to execute when retrieving
-  //   data for these channels
-  if (channel == 10 || channel == 11)
-  {
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return 1;
-  }
 
   // Set the I/O control command structure fields for calling the ec_sys_get_fan_status function
   //   in the libuLinux_hal library via the helper program
@@ -953,17 +937,6 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
 
   // Mark this channel as checked now so that we don't have to before each return statement
   data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
-
-  // Check if the channel number is 10 or 11 which are only valid for units with redundant power
-  //   supplies and cause the libuLinux_hal library functions to fail to execute when retrieving
-  //   data for these channels
-  if (channel == 10 || channel == 11)
-  {
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return 1;
-  }
 
   // Set the I/O control command structure fields for calling the ec_sys_get_temperature function
   //   in the libuLinux_hal library via the helper program

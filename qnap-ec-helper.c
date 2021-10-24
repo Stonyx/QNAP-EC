@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <syslog.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -56,22 +57,6 @@ int main(int argc, char** argv)
     close(device);
     closelog();
     exit(EXIT_FAILURE);
-  }
-
-  // Open the libuLinux_ini library
-  library = dlopen("/usr/local/lib/libuLinux_ini.so", RTLD_LAZY | RTLD_GLOBAL);
-  if (library == NULL)
-  {
-    // Open the libuLinux_ini library by name only and rely on the path to resolve its path
-    library = dlopen("libuLinux_ini.so", RTLD_LAZY);
-    if (library == NULL)
-    {
-      syslog(LOG_ERR, "libuLinux_ini library not found in the expected path (/usr/local/lib) or "
-        "any of the paths searched in by the dynamic linker");
-      close(device);
-      closelog();
-      exit(EXIT_FAILURE);
-    }
   }
 
   // Open the libuLinux_hal library
@@ -201,4 +186,41 @@ int main(int argc, char** argv)
   closelog();
 
   exit(EXIT_SUCCESS);
+}
+
+// Function called by functions in the libuLinux_hal library that is normally located in the
+//   libuLinux_ini library but has been overridden to simulate correct functionality
+int8_t Ini_Conf_Get_Field(char* file, char* section, char* field, char* value, uint32_t length)
+{
+  // Check if the file, section, and field values are not what we expect
+  if (strcmp(file, "/etc/model.conf") || strcmp(section, "System IO") ||
+    strcmp(field, "REDUNDANT_POWER_INFO"))
+  {
+    syslog(LOG_ERR, "unexpected call to simulated Ini_Conf_Get_Field function");
+    return -1;
+  }
+
+  // Copy the value into the string
+  strncpy(value, "no", length);
+
+  return 0;
+}
+
+// Function called by functions in the libuLinux_hal library that is normally located in the
+//   libuLinux_ini library but has been overridden to simulate correct functionality
+int8_t Ini_Conf_Get_Field_Int(char* file, char* section, char* field, int32_t* value,
+  uint32_t length)
+{
+  // Check if the file, section, and field values are not what we expect
+  if (strcmp(file, "/etc/model.conf") || strcmp(section, "System IO") ||
+    strcmp(field, "MAX_CPU_FAN_NUM"))
+  {
+    syslog(LOG_ERR, "unexpected call to simulated Ini_Conf_Get_Field_Int function");
+    return -1;
+  }
+
+  // Copy the value into the integer
+  *value = 1;
+
+  return 0;
 }
