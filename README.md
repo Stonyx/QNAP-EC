@@ -15,7 +15,7 @@ This will compile, link, and install the needed files along with inserting the m
 
 If you would like the kernel module to skip checking for the presence of the IT8528 chip (for example to run it on a QNAP NAS unit with a different chip to see if this driver will work) run the following to perform the installation:
 ```
-sudo make install EXTRA_MODULE_CFLAGS=-DSKIP_CHECK
+sudo make install MODULE_EXTRA_CFLAGS=-DSKIP_CHECK
 ```
 
 For development purposes there is a simulated libuLinux_hal library included that can be used when developing on a machine that doesn’t have a compatible embedded controller chip.  To build the simulated library run:
@@ -29,7 +29,7 @@ To uninstall the driver completely run:
 sudo make uninstall
 ```
 
-This driver has three components, the kernel module file called `qnap-ec.ko` which would be installed in the `/lib/modules/5.8.0-43-generic/extra/qnap-ec` directory on a vanilla Ubuntu 20.04.2.0 Live DVD system, the helper program file called `qnap-ec` which would be installed in the `/usr/local/sbin` directory (on a vanilla Ubuntu 20.04.2.0 Live DVD system) and the QNAP library file called `libuLinux_hal.so` which would be installed in the `/usr/local/lib` directory (on a vanilla Ubuntu 20.04.2.0 Live DVD).
+This driver has three components, the kernel module file called `qnap-ec.ko` which would be installed in the `/lib/modules/5.8.0-43-generic/extra` directory on a vanilla Ubuntu 20.04.2.0 Live DVD system, the helper program file called `qnap-ec` which would be installed in the `/usr/local/sbin` directory (on a vanilla Ubuntu 20.04.2.0 Live DVD system) and the QNAP library file called `libuLinux_hal.so` which would be installed in the `/usr/local/lib` directory (on a vanilla Ubuntu 20.04.2.0 Live DVD).
 
 If this driver is being installed on a Linux distribution with a different folder structure (for example Unraid) the files will need to be manually installed.  The `qnap-ec.ko` kernel module file location will depend on where the system usually expects kernel modules to be located.  The `qnap-ec` helper program file will need to reside in one of the following locations in order for the kernel module to be able to call it correctly:
 ```
