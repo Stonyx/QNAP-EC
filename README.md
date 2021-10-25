@@ -22,7 +22,7 @@ For development purposes there is a simulated libuLinux_hal library included tha
 ```
 make sim-lib
 ```
-This will replace the libuLinux_hal library with the simulated library so that running `sudo make install EXTRA_MODULE_CFLAGS=-DSKIP_CHECK` will install the simulated library (along with not checking for the presence of the IT8528 chip).
+This will replace the libuLinux_hal library with the simulated library so that running `sudo make install MODULE_EXTRA_CFLAGS=-DSKIP_CHECK` will install the simulated library (along with not checking for the presence of the IT8528 chip).
 
 To uninstall the driver completely run:
 ```
