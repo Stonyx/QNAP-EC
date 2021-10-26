@@ -17,12 +17,12 @@
 MODULE_NAME = qnap-ec
 MODULE_O_FILE = qnap-ec.o
 MODULE_BINARY_FILE = qnap-ec.ko
-MODULE_PATH = $(INSTALL_MOD_PATH)/lib/modules/$(shell uname -r)/extra
+MODULE_PATH = /lib/modules/$(shell uname -r)/extra/
 HELPER_C_FILE = qnap-ec-helper.c
 HELPER_BINARY_FILE = qnap-ec
-HELPER_PATH = $(DESTDIR)/usr/local/sbin
+HELPER_PATH = /usr/local/sbin/
 LIBRARY_BINARY_FILE = libuLinux_hal.so
-LIBRARY_PATH = $(DESTDIR)/usr/local/lib
+LIBRARY_PATH = /usr/local/lib/
 SIM_LIB_C_FILE = libuLinux_hal-simulated.c
 SIM_LIB_BINARY_FILE = libuLinux_hal.so
 DEPMOD_COMMAND = $(shell which depmod)
@@ -41,7 +41,7 @@ ifneq ($(KERNELRELEASE),)
   obj-m += $(MODULE_O_FILE)
 else
   # Set the kernel directory and working directory
-  KDIR = /lib/modules/$(shell uname -r)/build
+  KDIR = /lib/modules/$(shell uname -r)/build/
   PWD = $(shell pwd)
 endif
 
@@ -61,15 +61,15 @@ clean:
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
 install: module helper
-	$(INSTALL_COMMAND) $(LIBRARY_BINARY_FILE) $(LIBRARY_PATH)
-	$(INSTALL_COMMAND) $(HELPER_BINARY_FILE) $(HELPER_PATH)
-	$(MAKE) -C $(KDIR) M=$(PWD) modules_install
+	$(INSTALL_COMMAND) $(LIBRARY_BINARY_FILE) $(DESTDIR)$(LIBRARY_PATH)
+	$(INSTALL_COMMAND) $(HELPER_BINARY_FILE) $(DESTDIR)$(HELPER_PATH)
+	$(MAKE) -C $(KDIR) M=$(PWD) INSTALL_MOD_PATH=$(DESTDIR) modules_install
 	$(DEPMOD_COMMAND) --all
-	$(MODPROBE_COMMAND) $(MODULE_NAME)
+	-$(MODPROBE_COMMAND) $(MODULE_NAME)
 
 uninstall:
 	-$(MODPROBE_COMMAND) --remove $(MODULE_NAME)
-	$(RM) $(MODULE_PATH)/$(MODULE_BINARY_FILE)
+	$(RM) $(DESTDIR)$(MODULE_PATH)$(MODULE_BINARY_FILE)
 	$(DEPMOD_COMMAND) --all
-	$(RM) $(HELPER_PATH)/$(HELPER_BINARY_FILE)
-	$(RM) $(LIBRARY_PATH)/$(LIBRARY_BINARY_FILE)
+	$(RM) $(DESTDIR)$(HELPER_PATH)$(HELPER_BINARY_FILE)
+	$(RM) $(DESTDIR)$(LIBRARY_PATH)$(LIBRARY_BINARY_FILE)
