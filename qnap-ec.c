@@ -33,6 +33,7 @@ MODULE_DESCRIPTION("QNAP EC Driver");
 MODULE_VERSION("1.0.0");
 MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
+MODULE_PARM_DESC(skip_check, "Skip check for QNAP IT8528 E.C. chip");
 
 // Define the devices structure
 // Note: in order to use the container_of macro in the qnap_ec_misc_dev_open and 
@@ -41,7 +42,7 @@ MODULE_LICENSE("GPL");
 //       function) we need to make the plat_device member a pointer
 struct qnap_ec_devices {
   struct mutex misc_device_mutex;
-  uint8_t open_misc_device;
+  bool open_misc_device;
   struct miscdevice misc_device;
   struct platform_device* plat_device;
 };
@@ -76,14 +77,13 @@ static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int comman
 static int qnap_ec_misc_device_release(struct inode* inode, struct file* file);
 static void __exit qnap_ec_exit(void);
 
-// Declare and/or define needed variables for overriding the detected device ID
-static unsigned short qnap_ec_force_id;
-module_param(qnap_ec_force_id, ushort, 0);
-MODULE_PARM_DESC(qnap_ec_force_id, "Override the detected device ID");
-
 // Specifiy the initialization and exit functions
 module_init(qnap_ec_init);
 module_exit(qnap_ec_exit);
+
+// Declare and/or define needed module parameters
+static bool qnap_ec_skip_check;
+module_param_named(skip_check, qnap_ec_skip_check, bool, 0);
 
 // Declare the platform driver structure pointer
 static struct platform_driver* qnap_ec_plat_driver;
@@ -94,9 +94,6 @@ static struct qnap_ec_devices* qnap_ec_devices;
 // Function called to initialize the driver
 static int __init qnap_ec_init(void)
 {
-  // Declare needed variables
-  int error;
-
   // Define static constant data consisting of the miscellaneous device file operations structure
   static const struct file_operations misc_device_file_ops = {
     .owner = THIS_MODULE,
@@ -104,6 +101,9 @@ static int __init qnap_ec_init(void)
     .unlocked_ioctl = &qnap_ec_misc_device_ioctl,
     .release = &qnap_ec_misc_device_release
   };
+
+  // Declare needed variables
+  int error;
 
   // Check if the embedded controll chip isn't present
   error = qnap_ec_is_chip_present();
@@ -225,12 +225,15 @@ static int __init qnap_ec_init(void)
 // Function called to check if the QNAP embedded controller chip is present
 static int __init qnap_ec_is_chip_present(void)
 {
-#ifdef SKIP_CHECK
-  return 0;
-#else
   // Declare needed variables
   uint8_t byte1;
   uint8_t byte2;
+
+  // Check if we should skip the check
+  if (qnap_ec_skip_check)
+  {
+    return 0;
+  }
 
   // Request access to the input (0x2E) and output (0x2F) ports
   if (request_muxed_region(0x2E, 2, "qnap-ec") == NULL)
@@ -261,16 +264,11 @@ static int __init qnap_ec_is_chip_present(void)
   release_region(0x2E, 2);
 
   return 0;
-#endif
 }
 
 // Function called to probe this driver
 static int qnap_ec_probe(struct platform_device* platform_dev)
 {
-  // Declare needed variables
-  struct qnap_ec_data* data;
-  struct device* device;
-
   // Define static constant data consisiting of mulitple configuration arrays, multiple hwmon
   //   channel info structures, the hwmon channel info structures array, and the hwmon chip
   //   information structure
@@ -340,6 +338,10 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
     .info = hwmon_channel_info,
     .ops = &hwmon_ops
   };
+
+  // Declare needed variables
+  struct qnap_ec_data* data;
+  struct device* device;
 
   // Allocate device managed memory for the data structure
   data = devm_kzalloc(&platform_dev->dev, sizeof(struct qnap_ec_data), GFP_KERNEL);
@@ -539,13 +541,13 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   }
 
   // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = 1;
+  data->devices->open_misc_device = true;
 
   // Call the helper program
   if (qnap_ec_call_helper(1) != 0)
   {
     // Clear the open device flag
-    data->devices->open_misc_device = 0;
+    data->devices->open_misc_device = false;
 
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
@@ -554,7 +556,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   }
 
   // Clear the open device flag
-  data->devices->open_misc_device = 0;
+  data->devices->open_misc_device = false;
 
   // Check if the called function returned any errors
   if (data->ioctl_command.return_value_int8 != 0)
@@ -672,13 +674,13 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
   }
 
   // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = 1;
+  data->devices->open_misc_device = true;
 
   // Call the helper program
   if (qnap_ec_call_helper(1) != 0)
   {
     // Clear the open device flag
-    data->devices->open_misc_device = 0;
+    data->devices->open_misc_device = false;
 
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
@@ -690,7 +692,7 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
   }
 
   // Clear the open device flag
-  data->devices->open_misc_device = 0;
+  data->devices->open_misc_device = false;
 
   // Check if the called function returned any errors
   if (data->ioctl_command.return_value_int8 != 0)
@@ -765,13 +767,13 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   data->ioctl_command.argument2_uint32 = 0;
 
   // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = 1;
+  data->devices->open_misc_device = true;
 
   // Call the helper program
   if (qnap_ec_call_helper(0) != 0)
   {
     // Clear the open device flag
-    data->devices->open_misc_device = 0;
+    data->devices->open_misc_device = false;
 
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
@@ -780,7 +782,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   }
 
   // Clear the open device flag
-  data->devices->open_misc_device = 0;
+  data->devices->open_misc_device = false;
 
   // Check if the called function return value is non zero
   if (data->ioctl_command.return_value_int8 != 0)
@@ -811,13 +813,13 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   data->ioctl_command.argument2_uint32 = 0;
 
   // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = 1;
+  data->devices->open_misc_device = true;
 
   // Call the helper program
   if (qnap_ec_call_helper(0) != 0)
   {
     // Clear the open device flag
-    data->devices->open_misc_device = 0;
+    data->devices->open_misc_device = false;
 
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
@@ -826,7 +828,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   }
 
   // Clear the open device flag
-  data->devices->open_misc_device = 0;
+  data->devices->open_misc_device = false;
 
   // Check if the called function return value is non zero
   if (data->ioctl_command.return_value_int8 != 0)
@@ -857,13 +859,13 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   data->ioctl_command.argument2_uint32 = 0;
 
   // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = 1;
+  data->devices->open_misc_device = true;
 
   // Call the helper program
   if (qnap_ec_call_helper(0) != 0)
   {
     // Clear the open device flag
-    data->devices->open_misc_device = 0;
+    data->devices->open_misc_device = false;
 
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
@@ -872,7 +874,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   }
 
   // Clear the open device flag
-  data->devices->open_misc_device = 0;
+  data->devices->open_misc_device = false;
 
   // Check if the called function return value is non zero
   if (data->ioctl_command.return_value_int8 != 0)
@@ -947,13 +949,13 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   data->ioctl_command.argument2_int64 = 0;
 
   // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = 1;
+  data->devices->open_misc_device = true;
 
   // Call the helper program
   if (qnap_ec_call_helper(0) != 0)
   {
     // Clear the open device flag
-    data->devices->open_misc_device = 0;
+    data->devices->open_misc_device = false;
 
     // Release the data mutex lock
     mutex_unlock(&data->mutex);
@@ -962,7 +964,7 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   }
 
   // Clear the open device flag
-  data->devices->open_misc_device = 0;
+  data->devices->open_misc_device = false;
 
   // Check if the called function return value is non zero
   if (data->ioctl_command.return_value_int8 != 0)
@@ -1006,16 +1008,13 @@ static int qnap_ec_call_helper(uint8_t log_error)
   char* paths[] = { "/usr/local/sbin/qnap-ec", "/usr/local/bin/qnap-ec", "/usr/sbin/qnap-ec",
     "/usr/bin/qnap-ec", "/sbin/qnap-ec", "/bin/qnap-ec" };
 #endif
-  char* environment[] = { "PATH=/usr/local/sbin;/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin",
-    NULL };
 
   // Loop through the paths while the first 8 bits of the return value contain any error codes
   do
   {
     // Call the user space helper program
-    return_value = call_usermodehelper(paths[i], (char*[]){ paths[i], NULL }, environment,
-      UMH_WAIT_PROC);
-  } while (++i < sizeof(paths) / sizeof(char*) && (return_value & 0xFF) != 0);
+    return_value = call_usermodehelper(paths[i], (char*[]){ paths[i], NULL }, NULL, UMH_WAIT_PROC);
+  } while ((return_value & 0xFF) != 0 && ++i < sizeof(paths) / sizeof(char*));
 
   // Check if the first 8 bits of the return value contain any error codes
   if ((return_value & 0xFF) != 0)
@@ -1062,7 +1061,7 @@ static int qnap_ec_misc_device_open(struct inode* inode, struct file* file)
     misc_device);
 
   // Check if the open device flag is not set which means we are not expecting any communications
-  if (devices->open_misc_device == 0)
+  if (devices->open_misc_device == false)
   {
     return -EBUSY;
   }
