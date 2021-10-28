@@ -13,63 +13,94 @@
 # http://www.gnu.org/copyleft/gpl.html or write to The Free Software Foundation, 675 Mass Ave,
 # Cambridge, MA 02139, USA.
 
-# Define names, paths, and commands
-MODULE_NAME = qnap-ec
-MODULE_O_FILE = qnap-ec.o
-MODULE_BINARY_FILE = qnap-ec.ko
-MODULE_PATH = /lib/modules/$(shell uname -r)/extra/
-HELPER_C_FILE = qnap-ec-helper.c
-HELPER_BINARY_FILE = qnap-ec
-HELPER_PATH = /usr/local/sbin/
-LIBRARY_BINARY_FILE = libuLinux_hal.so
-LIBRARY_PATH = /usr/local/lib/
-SIM_LIB_C_FILE = libuLinux_hal-simulated.c
-SIM_LIB_BINARY_FILE = libuLinux_hal.so
-DEPMOD_COMMAND = $(shell which depmod)
-INSTALL_COMMAND = $(shell which install)
-MODPROBE_COMMAND = $(shell which modprobe)
 
-# Set compiler flags for the module (ccflags-y is used for both builtin and modules), for the
-#   helper, and for the simulated library
-ccflags-y = -Wall -O2 -lgcc $(MODULE_EXTRA_CFLAGS)
-HELPER_CFLAGS = -Wall -O2 -export-dynamic -ldl $(HELPER_EXTRA_CFLAGS)
-SIM_LIB_CFLAGS = -Wall -O2 -fPIC -shared $(SIM_LIB_EXTRA_CLFAGS)
+# Define filenames, paths, and commands
+# Note: we are using simply expanded variables exclusively to make things more predictable
+LIBRARY_BINARY_FILE := libuLinux_hal.so
+LIBRARY_COMPILED_PATH := /usr/local/lib
+LIBRARY_PACKAGED_PATH := /usr/lib
+HELPER_C_FILE := qnap-ec-helper.c
+HELPER_BINARY_FILE := qnap-ec
+HELPER_COMPILED_PATH := /usr/local/sbin
+HELPER_PACKAGED_PATH := /usr/sbin
+MODULE_NAME := qnap-ec
+MODULE_O_FILE := qnap-ec.o
+MODULE_BINARY_FILE := qnap-ec.ko
+MODULE_PATH := /lib/modules/$(shell uname -r)/extra
+SIM_LIB_C_FILE := libuLinux_hal-simulated.c
+SIM_LIB_BINARY_FILE := libuLinux_hal.so
+DEPMOD_COMMAND := $(shell which depmod)
+INSTALL_COMMAND := $(shell which install)
+MODPROBE_COMMAND := $(shell which modprobe)
 
-# Check if we've been invoked from the kernel build system and can use its language
-ifneq ($(KERNELRELEASE),)
-	# Set the module object filename
-  obj-m += $(MODULE_O_FILE)
+# Set the helper compiler flags, add target specific flags, and add any extra flags
+HELPER_CFLAGS := -Wall -O2 -export-dynamic -ldl
+package : HELPER_CFLAGS += -DPACKAGED
+HELPER_CFLAGS += $(HELPER_EXTRA_CFLAGS)
+
+# Set the simulated library compiler flags
+SIM_LIB_CFLAGS := -Wall -O2 -fPIC -shared $(SIM_LIB_EXTRA_CLFAGS)
+
+# Check if the KERNELRELEASE variable is not defined
+# Note: if KERNELRELEASE is not defined we are in this make file for the first time as part of the
+#       make process and if it is been defined we are in this make file for the second time as part
+#       of the kbuild process
+ifndef KERNELRELEASE
+  # Set the kernel build directory, working directory, and target specific module compiler flags
+  # Note: target specific variables need to be set in this section of the if statement since
+  #       the target is not known after the kbuild process is invoked
+  KDIR := /lib/modules/$(shell uname -r)/build
+  PWD := $(shell pwd)
+  package : MODULE_CFLAGS := -DPACKAGED
 else
-  # Set the kernel directory and working directory
-  KDIR = /lib/modules/$(shell uname -r)/build/
-  PWD = $(shell pwd)
+	# Set the module object filename
+  obj-m := $(MODULE_O_FILE)
+
+  # Set the module compiler flags using any passed in compiler flags from the first run through
+  #   this make file as part of the make process and add any extra flags
+  ccflags-y := $(MODULE_CFLAGS) -Wall -O2 -lgcc $(MODULE_EXTRA_CFLAGS)
 endif
 
-all: clean module helper
+# Define the all target
+all: clean helper module
 
-module:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
-
-helper: $(HELPER_C_FILE)
-	$(CC) -o $(HELPER_BINARY_FILE) $^ $(HELPER_CFLAGS)
-
-sim-lib: $(SIM_LIB_C_FILE)
-	$(CC) -o $(SIM_LIB_BINARY_FILE) $^ $(SIM_LIB_CFLAGS)
-
+# Define the clean target
 clean:
 	$(RM) $(HELPER_BINARY_FILE)
 	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
-install: module helper
-	$(INSTALL_COMMAND) -D $(LIBRARY_BINARY_FILE) $(DESTDIR)$(LIBRARY_PATH)$(LIBRARY_BINARY_FILE)
-	$(INSTALL_COMMAND) -D --strip $(HELPER_BINARY_FILE) $(DESTDIR)$(HELPER_PATH)$(HELPER_BINARY_FILE)
-	$(MAKE) -C $(KDIR) M=$(PWD) INSTALL_MOD_PATH=$(DESTDIR) modules_install
+# Define the helper target
+helper:
+	$(CC) -o $(HELPER_BINARY_FILE) $(HELPER_C_FILE) $(HELPER_CFLAGS)
+
+# Define the module target
+module:
+	$(MAKE) -C $(KDIR) M=$(PWD) MODULE_CFLAGS=$(MODULE_CFLAGS) modules
+
+# Define the install target
+install: clean helper module
+	$(INSTALL_COMMAND) $(LIBRARY_BINARY_FILE) $(LIBRARY_COMPILED_PATH)/$(LIBRARY_BINARY_FILE)
+	$(INSTALL_COMMAND) --strip $(HELPER_BINARY_FILE) $(HELPER_COMPILED_PATH)/$(HELPER_BINARY_FILE)
+	$(MAKE) -C $(KDIR) M=$(PWD) modules_install
 	$(DEPMOD_COMMAND) --all
 	-$(MODPROBE_COMMAND) $(MODULE_NAME)
 
+# Define the package target
+package: clean helper module
+	$(INSTALL_COMMAND) -D $(LIBRARY_BINARY_FILE) \
+		$(DESTDIR)$(LIBRARY_PACKAGED_PATH)/$(LIBRARY_BINARY_FILE)
+	$(INSTALL_COMMAND) -D --strip $(HELPER_BINARY_FILE) \
+		$(DESTDIR)$(HELPER_PACKAGED_PATH)/$(HELPER_BINARY_FILE)
+	$(MAKE) -C $(KDIR) M=$(PWD) INSTALL_MOD_PATH=$(DESTDIR) modules_install
+
+# Define the uninstall target
 uninstall:
 	-$(MODPROBE_COMMAND) --remove $(MODULE_NAME)
-	$(RM) $(DESTDIR)$(MODULE_PATH)$(MODULE_BINARY_FILE)
+	$(RM) $(MODULE_PATH)/$(MODULE_BINARY_FILE)
 	$(DEPMOD_COMMAND) --all
-	$(RM) $(DESTDIR)$(HELPER_PATH)$(HELPER_BINARY_FILE)
-	$(RM) $(DESTDIR)$(LIBRARY_PATH)$(LIBRARY_BINARY_FILE)
+	$(RM) $(HELPER_COMPILED_PATH)/$(HELPER_BINARY_FILE)
+	$(RM) $(LIBRARY_COMPILED_PATH)/$(LIBRARY_BINARY_FILE)
+
+# Define the sim-lib target
+sim-lib: $(SIM_LIB_C_FILE)
+	$(CC) -o $(SIM_LIB_BINARY_FILE) $^ $(SIM_LIB_CFLAGS)

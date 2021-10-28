@@ -226,11 +226,8 @@ static int __init qnap_ec_init(void)
 static int __init qnap_ec_is_chip_present(void)
 {
 #ifdef SKIP_CHECK
-
   return 0;
-
 #else
-
   // Declare needed variables
   uint8_t byte1;
   uint8_t byte2;
@@ -264,7 +261,6 @@ static int __init qnap_ec_is_chip_present(void)
   release_region(0x2E, 2);
 
   return 0;
-
 #endif
 }
 
@@ -1002,54 +998,40 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
 static int qnap_ec_call_helper(uint8_t log_error)
 {
   // Declare and/or define needed variables
+  uint8_t i = 0;
   int return_value;
-  char* arguments[] = {
-    "/usr/local/sbin/qnap-ec",
-    NULL
-  };
-  char* environment[] = {
-    "PATH=/usr/local/sbin;/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin",
-    NULL
-  };
+#ifdef PACKAGED
+  char* paths[] = { "/usr/sbin/qnap-ec", "/usr/bin/qnap-ec", "/sbin/qnap-ec", "/bin/qnap-ec" };
+#else
+  char* paths[] = { "/usr/local/sbin/qnap-ec", "/usr/local/bin/qnap-ec", "/usr/sbin/qnap-ec",
+    "/usr/bin/qnap-ec", "/sbin/qnap-ec", "/bin/qnap-ec" };
+#endif
+  char* environment[] = { "PATH=/usr/local/sbin;/usr/local/bin;/usr/sbin;/usr/bin;/sbin;/bin",
+    NULL };
 
-  // Call the user space helper program and check if the first 8 bits of the return value
-  //   contain any error codes
-  return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
+  // Loop through the paths while the first 8 bits of the return value contain any error codes
+  do
+  {
+    // Call the user space helper program
+    return_value = call_usermodehelper(paths[i], (char*[]){ paths[i], NULL }, environment,
+      UMH_WAIT_PROC);
+  } while (++i < sizeof(paths) / sizeof(char*) && (return_value & 0xFF) != 0);
+
+  // Check if the first 8 bits of the return value contain any error codes
   if ((return_value & 0xFF) != 0)
   {
-    // Try calling the user space helper program in the fall back locations
-    arguments[0] = "/usr/local/bin/qnap-ec";
-    return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
-    if ((return_value & 0xFF) != 0)
-    {
-      arguments[0] = "/usr/sbin/qnap-ec";
-      return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
-      if ((return_value & 0xFF) != 0)
-      {
-        arguments[0] = "/usr/bin/qnap-ec";
-        return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
-        if ((return_value & 0xFF) != 0)
-        {
-          arguments[0] = "/sbin/qnap-ec";
-          return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
-          if ((return_value & 0xFF) != 0)
-          {
-            arguments[0] = "/bin/qnap-ec";
-            return_value = call_usermodehelper(arguments[0], arguments, environment, UMH_WAIT_PROC);
-            if ((return_value & 0xFF) != 0)
-            {
-              // Log the error
-              printk(KERN_ERR "qnap-ec helper program not found in the expected path "
-                "(/usr/local/sbin) or any of the fall back paths (/usr/local/bin;/usr/sbin;"
-                "/usr/bin;/sbin;/bin)");
+    // Log the error
+#ifdef PACKAGED
+    printk(KERN_ERR "qnap-ec helper program not found at the expected path (%s) or any of the "
+      "fall back paths (%s, %s, %s)", paths[0], paths[1], paths[2], paths[3]);
+#else
+    printk(KERN_ERR "qnap-ec helper program not found at the expected path (%s) or any of the "
+      "fall back paths (%s, %s, %s, %s, %s)", paths[0], paths[1], paths[2], paths[3], paths[4],
+      paths[5]);
+#endif
 
-              // Return the call_usermodehelper function's error code
-              return return_value & 0xFF;
-            }
-          }
-        }
-      }
-    }
+    // Return the call_usermodehelper function's error code
+    return return_value & 0xFF;
   }
 
   // Check if the user space helper program's return value stored in the second 8 bits of the

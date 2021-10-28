@@ -60,15 +60,24 @@ int main(int argc, char** argv)
   }
 
   // Open the libuLinux_hal library
+#ifdef PACKAGED
+  library = dlopen("/usr/lib/libuLinux_hal.so", RTLD_LAZY);
+#else
   library = dlopen("/usr/local/lib/libuLinux_hal.so", RTLD_LAZY);
+#endif
   if (library == NULL)
   {
     // Open the libuLinux_hal library by name only and rely on the path to resolve its path
     library = dlopen("libuLinux_hal.so", RTLD_LAZY);
     if (library == NULL)
     {
-      syslog(LOG_ERR, "libuLinux_hal library not found in the expected path (/usr/local/lib) or "
-        "any of the paths searched in by the dynamic linker");
+#ifdef PACKAGED
+      syslog(LOG_ERR, "libuLinux_hal library not found at the expected path (/usr/lib/"
+        "libuLinux_hal.so) or any of the paths searched in by the dynamic linker");
+#else
+      syslog(LOG_ERR, "libuLinux_hal library not found at the expected path (/usr/local/lib/"
+        "libuLinux_hal.so) or any of the paths searched in by the dynamic linker");
+#endif
       close(device);
       closelog();
       exit(EXIT_FAILURE);
