@@ -56,8 +56,8 @@ else
 	# Set the module object filename
   obj-m := $(MODULE_O_FILE)
 
-  # Set the module compiler flags using any passed in compiler flags from the first run through
-  #   this make file as part of the make process and add any extra flags
+  # Set the module compiler flags using any passed in flags from the first run through this make
+  #   file as part of the make process and add any extra flags
   ccflags-y := $(MODULE_CFLAGS) -Wall -O2 -lgcc $(MODULE_EXTRA_CFLAGS)
 endif
 
@@ -87,10 +87,8 @@ install: clean helper module
 
 # Define the package target
 package: clean helper module
-	$(INSTALL_COMMAND) -D $(LIBRARY_BINARY_FILE) \
-		$(DESTDIR)$(LIBRARY_PACKAGED_PATH)/$(LIBRARY_BINARY_FILE)
-	$(INSTALL_COMMAND) -D --strip $(HELPER_BINARY_FILE) \
-		$(DESTDIR)$(HELPER_PACKAGED_PATH)/$(HELPER_BINARY_FILE)
+	$(INSTALL_COMMAND) -D $(LIBRARY_BINARY_FILE) $(DESTDIR)$(LIBRARY_PACKAGED_PATH)/$(LIBRARY_BINARY_FILE)
+	$(INSTALL_COMMAND) -D --strip $(HELPER_BINARY_FILE) $(DESTDIR)$(HELPER_PACKAGED_PATH)/$(HELPER_BINARY_FILE)
 	$(MAKE) -C $(KDIR) M=$(PWD) INSTALL_MOD_PATH=$(DESTDIR) modules_install
 
 # Define the uninstall target
@@ -102,5 +100,5 @@ uninstall:
 	$(RM) $(LIBRARY_COMPILED_PATH)/$(LIBRARY_BINARY_FILE)
 
 # Define the sim-lib target
-sim-lib: $(SIM_LIB_C_FILE)
-	$(CC) -o $(SIM_LIB_BINARY_FILE) $^ $(SIM_LIB_CFLAGS)
+sim-lib:
+	$(CC) -o $(SIM_LIB_BINARY_FILE) $(SIM_LIB_C_FILE) $(SIM_LIB_CFLAGS)
