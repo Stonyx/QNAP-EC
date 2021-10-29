@@ -13,25 +13,25 @@ sudo make install
 ```
 This will compile, link, and install the needed files along with inserting the module into the kernel (it uses modprobe to insert the module into the kernel which will NOT persist after a reboot).
 
-If you would like the kernel module to skip checking for the presence of the IT8528 chip (for example to run it on a QNAP NAS unit with a different chip to see if this driver will work) run the following to perform the installation:
+If you would like the kernel module to skip checking for the presence of the IT8528 chip (for example to run it on a QNAP NAS unit with a different chip to see if this driver will work) run the following command when inserting the module into the kernel:
 ```
-sudo make install MODULE_EXTRA_CFLAGS=-DSKIP_CHECK
+sudo modprobe qnap-ec skip-check=yes
 ```
 
-For development purposes there is a simulated libuLinux_hal library included that can be used when developing on a machine that doesn’t have a compatible embedded controller chip.  To build the simulated library run:
+For development purposes there is a simulated libuLinux_hal library included that can be used when developing on a machine that doesn’t have a compatible embedded controller chip.  To build the simulated library run the following command:
 ```
 make sim-lib
 ```
-This will replace the libuLinux_hal library with the simulated library so that running `sudo make install MODULE_EXTRA_CFLAGS=-DSKIP_CHECK` will install the simulated library (along with not checking for the presence of the IT8528 chip).
+This will replace the libuLinux_hal library with the simulated library so that running `sudo make install` will install the simulated library (don't forget to include the `skip-check=yes` module parameter when inserting the module into the kernel to skip the check for the presence of the IT8528 chip).
 
-To uninstall the driver completely run:
+To uninstall the driver completely run the following command:
 ```
 sudo make uninstall
 ```
 
 This driver has three components, the kernel module file called `qnap-ec.ko` which would be installed in the `/lib/modules/5.8.0-43-generic/extra` directory on a vanilla Ubuntu 20.04.2.0 Live DVD system, the helper program file called `qnap-ec` which would be installed in the `/usr/local/sbin` directory (on a vanilla Ubuntu 20.04.2.0 Live DVD system) and the QNAP library file called `libuLinux_hal.so` which would be installed in the `/usr/local/lib` directory (on a vanilla Ubuntu 20.04.2.0 Live DVD).
 
-If this driver is being installed on a Linux distribution with a different folder structure (for example Unraid) the files will need to be manually installed.  The `qnap-ec.ko` kernel module file location will depend on where the system usually expects kernel modules to be located.  The `qnap-ec` helper program file will need to reside in one of the following locations in order for the kernel module to be able to call it correctly:
+If this driver is being installed on a Linux distribution with a different folder structure (for example Unraid) the files will need to be manually installed.  The `qnap-ec.ko` kernel module file location will depend on where the system usually expects kernel modules to be located.  The `qnap-ec` helper program file will need to reside in one of the following locations in order for the kernel module to be able to call it correctly (the first two locations are only valid if this driver is not being packaged):
 ```
 /usr/local/sbin
 /usr/local/bin
@@ -40,5 +40,9 @@ If this driver is being installed on a Linux distribution with a different folde
 /sbin
 /bin
 ```
-
 And the `libuLinux_hal.so` QNAP library file will need to be in a location where the dynamic linker will be able to find it.
+
+If you would like to create a package containing this driver run the following command which uses the `package` make target in combination with `DESTDIR` to create the necessary files and folders in the package staging location:
+```
+sudo make package DESTDIR=full_path_to_package_staging_location
+```
