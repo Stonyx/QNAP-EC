@@ -70,7 +70,7 @@ static int qnap_ec_hwmon_write(struct device* dev, enum hwmon_sensor_types type,
                                int channel, long value);
 static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int channel);
 static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel);
-static int qnap_ec_call_helper(uint8_t log_error);
+static int qnap_ec_call_helper(bool log_helper_error);
 static int qnap_ec_misc_device_open(struct inode* inode, struct file* file);
 static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int command,
                                           unsigned long argument);
@@ -81,8 +81,8 @@ static void __exit qnap_ec_exit(void);
 module_init(qnap_ec_init);
 module_exit(qnap_ec_exit);
 
-// Declare and/or define needed module parameters
-static bool qnap_ec_skip_check;
+// Define the module parameters
+static bool qnap_ec_skip_check = false;
 module_param_named(skip_check, qnap_ec_skip_check, bool, 0);
 
 // Declare the platform driver structure pointer
@@ -544,7 +544,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
   data->devices->open_misc_device = true;
 
   // Call the helper program
-  if (qnap_ec_call_helper(1) != 0)
+  if (qnap_ec_call_helper(true) != 0)
   {
     // Clear the open device flag
     data->devices->open_misc_device = false;
@@ -677,7 +677,7 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
   data->devices->open_misc_device = true;
 
   // Call the helper program
-  if (qnap_ec_call_helper(1) != 0)
+  if (qnap_ec_call_helper(true) != 0)
   {
     // Clear the open device flag
     data->devices->open_misc_device = false;
@@ -770,7 +770,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   data->devices->open_misc_device = true;
 
   // Call the helper program
-  if (qnap_ec_call_helper(0) != 0)
+  if (qnap_ec_call_helper(false) != 0)
   {
     // Clear the open device flag
     data->devices->open_misc_device = false;
@@ -816,7 +816,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   data->devices->open_misc_device = true;
 
   // Call the helper program
-  if (qnap_ec_call_helper(0) != 0)
+  if (qnap_ec_call_helper(false) != 0)
   {
     // Clear the open device flag
     data->devices->open_misc_device = false;
@@ -862,7 +862,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   data->devices->open_misc_device = true;
 
   // Call the helper program
-  if (qnap_ec_call_helper(0) != 0)
+  if (qnap_ec_call_helper(false) != 0)
   {
     // Clear the open device flag
     data->devices->open_misc_device = false;
@@ -952,7 +952,7 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   data->devices->open_misc_device = true;
 
   // Call the helper program
-  if (qnap_ec_call_helper(0) != 0)
+  if (qnap_ec_call_helper(false) != 0)
   {
     // Clear the open device flag
     data->devices->open_misc_device = false;
@@ -997,12 +997,12 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
 // Note: the return value is the call_usermodehelper function's error code if an error code was
 //       returned or if successful the return value is the user space helper program's error code
 //       if an error code was returned or if successful the return value is zero
-static int qnap_ec_call_helper(uint8_t log_error)
+static int qnap_ec_call_helper(bool log_helper_error)
 {
   // Declare and/or define needed variables
   uint8_t i = 0;
   int return_value;
-#ifdef PACKAGED
+#ifdef PACKAGE
   char* paths[] = { "/usr/sbin/qnap-ec", "/usr/bin/qnap-ec", "/sbin/qnap-ec", "/bin/qnap-ec" };
 #else
   char* paths[] = { "/usr/local/sbin/qnap-ec", "/usr/local/bin/qnap-ec", "/usr/sbin/qnap-ec",
@@ -1020,7 +1020,7 @@ static int qnap_ec_call_helper(uint8_t log_error)
   if ((return_value & 0xFF) != 0)
   {
     // Log the error
-#ifdef PACKAGED
+#ifdef PACKAGE
     printk(KERN_ERR "qnap-ec helper program not found at the expected path (%s) or any of the "
       "fall back paths (%s, %s, %s)", paths[0], paths[1], paths[2], paths[3]);
 #else
@@ -1040,7 +1040,7 @@ static int qnap_ec_call_helper(uint8_t log_error)
     // Log the error
     // Note: the sign (+/-) of the user space helper program's error code is not returned by the
     //       call_usermodehelper function
-    if (log_error)
+    if (log_helper_error)
     {
       printk(KERN_ERR "qnap-ec helper program exited with a non zero exit code (+/-%i)",
         ((return_value >> 8) & 0xFF));

@@ -35,7 +35,7 @@ MODPROBE_COMMAND := $(shell which modprobe)
 
 # Set the helper compiler flags, add target specific flags, and add any extra flags
 HELPER_CFLAGS := -Wall -O2 -export-dynamic -ldl
-package : HELPER_CFLAGS += -DPACKAGED
+package : HELPER_CFLAGS += -DPACKAGE
 HELPER_CFLAGS += $(HELPER_EXTRA_CFLAGS)
 
 # Set the simulated library compiler flags
@@ -51,14 +51,14 @@ ifndef KERNELRELEASE
   #       the target is not known after the kbuild process is invoked
   KDIR := /lib/modules/$(shell uname -r)/build
   PWD := $(shell pwd)
-  package : MODULE_CFLAGS := -DPACKAGED
+  package : MODULE_CFLAGS := -DPACKAGE
 else
 	# Set the module object filename
   obj-m := $(MODULE_O_FILE)
 
   # Set the module compiler flags using any passed in flags from the first run through this make
   #   file as part of the make process and add any extra flags
-  ccflags-y := $(MODULE_CFLAGS) -Wall -O2 -lgcc $(MODULE_EXTRA_CFLAGS)
+  ccflags-y := -Wall -O2 -lgcc $(MODULE_CFLAGS) $(MODULE_EXTRA_CFLAGS)
 endif
 
 # Define the all target
