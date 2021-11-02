@@ -28,12 +28,23 @@
 #undef pr_fmt
 #define pr_fmt(fmt) "%s @ %s: " fmt, "qnap-ec", __FUNCTION__
 
-// Specify module details
+// Define module details
 MODULE_DESCRIPTION("QNAP EC Driver");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.1.0");
 MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
 MODULE_PARM_DESC(skip_check, "Skip check for QNAP IT8528 E.C. chip");
+MODULE_PARM_DESC(sim_pwm_enable, "Simulate pwmX_enable sysfs attribute");
+
+// Define maximum number of possible channels
+// Note: number of channels has to be multiples of 8 and less than 256 and is based on the switch
+//       statements in the ec_sys_get_fan_status, ec_sys_get_fan_speed, ec_sys_get_fan_pwm, and
+//       ec_sys_get_temperature functions in the libuLinux_hal.so library as decompiled by IDA and
+//       rounded up to the nearest multiple of 32 to allow for future additions of channels in
+//       those functions
+#define QNAP_EC_NUMBER_OF_FAN_CHANNELS 64
+#define QNAP_EC_NUMBER_OF_PWM_CHANNELS QNAP_EC_NUMBER_OF_FAN_CHANNELS
+#define QNAP_EC_NUMBER_OF_TEMP_CHANNELS 64
 
 // Define the devices structure
 // Note: in order to use the container_of macro in the qnap_ec_misc_dev_open and 
@@ -52,10 +63,12 @@ struct qnap_ec_data {
   struct mutex mutex;
   struct qnap_ec_devices* devices;
   struct qnap_ec_ioctl_command ioctl_command;
-  uint64_t fan_or_pwm_channel_checked_field;
-  uint64_t fan_or_pwm_channel_valid_field;
-  uint64_t temp_channel_checked_field;
-  uint64_t temp_channel_valid_field;
+  uint8_t fan_channel_checked_field[QNAP_EC_NUMBER_OF_FAN_CHANNELS / 8];
+  uint8_t fan_channel_valid_field[QNAP_EC_NUMBER_OF_FAN_CHANNELS / 8];
+  uint8_t pwm_channel_checked_field[QNAP_EC_NUMBER_OF_PWM_CHANNELS / 8];
+  uint8_t pwm_channel_valid_field[QNAP_EC_NUMBER_OF_PWM_CHANNELS / 8];
+  uint8_t temp_channel_checked_field[QNAP_EC_NUMBER_OF_TEMP_CHANNELS / 8];
+  uint8_t temp_channel_valid_field[QNAP_EC_NUMBER_OF_TEMP_CHANNELS / 8];
 };
 
 // Declare functions
@@ -68,7 +81,8 @@ static int qnap_ec_hwmon_read(struct device* dev, enum hwmon_sensor_types type, 
                               int channel, long* value);
 static int qnap_ec_hwmon_write(struct device* dev, enum hwmon_sensor_types type, u32 attribute,
                                int channel, long value);
-static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int channel);
+static int qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, int channel);
+static int qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, int channel);
 static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel);
 static int qnap_ec_call_helper(bool log_helper_error);
 static int qnap_ec_misc_device_open(struct inode* inode, struct file* file);
@@ -82,7 +96,9 @@ module_init(qnap_ec_init);
 module_exit(qnap_ec_exit);
 
 // Define the module parameters
+static bool qnap_ec_sim_pwm_enable = false;
 static bool qnap_ec_skip_check = false;
+module_param_named(sim_pwm_enable, qnap_ec_sim_pwm_enable, bool, 0);
 module_param_named(skip_check, qnap_ec_skip_check, bool, 0);
 
 // Declare the platform driver structure pointer
@@ -269,52 +285,12 @@ static int __init qnap_ec_is_chip_present(void)
 // Function called to probe this driver
 static int qnap_ec_probe(struct platform_device* platform_dev)
 {
-  // Define static constant data consisiting of mulitple configuration arrays, multiple hwmon
-  //   channel info structures, the hwmon channel info structures array, and the hwmon chip
-  //   information structure
-  // Note: the number of entries in the configuration arrays need to match the number of supported
-  //       channels in the fan_or_pwm_channel_checked/valid_field and
-  //       temp_channel_checked/valid_field bitfield members in the qnap_ec_data structure which
-  //       is based on the switch statements in the ec_sys_get_fan_status, ec_sys_get_fan_speed,
-  //       ec_sys_get_fan_pwm, and ec_sys_get_temperature functions in the libuLinux_hal.so library
-  //       as decompiled by IDA and rounded up to the nearest multiple of 32 to allow for future
-  //       additions of channels in those functions
-  static const u32 fan_config[] = { HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT,
-    HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, HWMON_F_INPUT, 0 };
-  static const u32 pwm_config[] = { HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT, HWMON_PWM_INPUT,
-    HWMON_PWM_INPUT, 0 };
-  static const u32 temp_config[] = { HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT,
-    HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, HWMON_T_INPUT, 0 };
+  // Define static non constant and constant data consisiting of mulitple configuration arrays,
+  //   multiple hwmon channel info structures, the hwmon channel info structures array, and the
+  //   hwmon chip information structure
+  static u32 fan_config[QNAP_EC_NUMBER_OF_FAN_CHANNELS + 1];
+  static u32 pwm_config[QNAP_EC_NUMBER_OF_PWM_CHANNELS + 1];
+  static u32 temp_config[QNAP_EC_NUMBER_OF_TEMP_CHANNELS + 1];
   static const struct hwmon_channel_info fan_channel_info = {
     .type = hwmon_fan,
     .config = fan_config
@@ -340,6 +316,7 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   };
 
   // Declare needed variables
+  uint8_t i;
   struct qnap_ec_data* data;
   struct device* device;
 
@@ -359,7 +336,38 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   //       in the qnap_ec_is_visible function which is called when the hwmon device is registered
   dev_set_drvdata(&platform_dev->dev, data);
 
-  // Register the hwmon device and include the data structure
+  // Populate the fan configuration array
+  for (i = 0; i < QNAP_EC_NUMBER_OF_FAN_CHANNELS; ++i)
+  {
+    fan_config[i] = HWMON_F_INPUT;
+  }
+  fan_config[i] = 0;
+
+  // Populate the PWM configuration array
+  if (qnap_ec_sim_pwm_enable)
+  {
+    for (i = 0; i < QNAP_EC_NUMBER_OF_PWM_CHANNELS; ++i)
+    {
+      pwm_config[i] = HWMON_PWM_INPUT | HWMON_PWM_ENABLE;
+    }
+  }
+  else
+  {
+    for (i = 0; i < QNAP_EC_NUMBER_OF_PWM_CHANNELS; ++i)
+    {
+      pwm_config[i] = HWMON_PWM_INPUT;
+    }
+  }
+  pwm_config[i] = 0;
+
+  // Populate the temperature configuration array
+  for (i = 0; i < QNAP_EC_NUMBER_OF_TEMP_CHANNELS; ++i)
+  {
+    temp_config[i] = HWMON_T_INPUT;
+  }
+  temp_config[i] = 0;
+
+  // Register the hwmon device and pass in the data structure
   // Note: hwmon device name cannot contain dashes
   device = devm_hwmon_device_register_with_info(&platform_dev->dev, "qnap_ec", data,
     &hwmon_chip_info, NULL);
@@ -391,7 +399,7 @@ static umode_t qnap_ec_hwmon_is_visible(const void* const_data, enum hwmon_senso
       {
         case hwmon_fan_input:
           // Check if this channel is valid
-          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) == 0)
+          if (qnap_ec_is_fan_channel_valid(data, channel) == 0)
           {
             // Make the fan input read only
             return S_IRUGO;
@@ -405,7 +413,7 @@ static umode_t qnap_ec_hwmon_is_visible(const void* const_data, enum hwmon_senso
       {
         case hwmon_pwm_input:
           // Check if this channel is valid
-          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) == 0)
+          if (qnap_ec_is_pwm_channel_valid(data, channel) == 0)
           {
             // Make the PWM input read/write
             return S_IRUGO | S_IWUSR;
@@ -453,7 +461,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_fan_input:
           // Check if this channel is invalid
-          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
+          if (qnap_ec_is_fan_channel_valid(data, channel) != 0)
           {
             return -EOPNOTSUPP;
           }
@@ -482,7 +490,7 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       {
         case hwmon_pwm_input:
           // Check if this channel is invalid
-          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
+          if (qnap_ec_is_pwm_channel_valid(data, channel) != 0)
           {
             return -EOPNOTSUPP;
           }
@@ -646,7 +654,7 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
       {
         case hwmon_pwm_input:
           // Check if this channel is invalid
-          if (qnap_ec_is_fan_or_pwm_channel_valid(data, channel) != 0)
+          if (qnap_ec_is_pwm_channel_valid(data, channel) != 0)
           {
             return -EOPNOTSUPP;
           }
@@ -717,12 +725,12 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
   return 0;
 }
 
-// Function called to check if the fan or PWM channel number is valid
+// Function called to check if the fan channel number is valid
 // Note: the return value is 0 if the channel is valid, a positive value if the channel is
 //       invalid, and a negative value if an error occurred
-static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int channel)
+static int qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, int channel)
 {
-  // Note: based on testing the logic to determining if a fan or PWM channel is valid is:
+  // Note: based on testing the logic to determining if a fan channel is valid is:
   //       - if channel is 10 or 11 then channel is invalid
   //       - call ec_sys_get_fan_status function in the libuLinux_hal library
   //       - if the function return value is non zero then the channel is invalid
@@ -739,10 +747,10 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   //       value of 0 to signal that everything is correct
 
   // Check if this channel has already been checked
-  if (((data->fan_or_pwm_channel_checked_field >> channel) & 0x01) == 1)
+  if (((data->fan_channel_checked_field[channel / 8] >> (channel % 8)) & 0x01) == 1)
   {
     // Check if this channel is invalid
-    if (((data->fan_or_pwm_channel_valid_field >> channel) & 0x01) == 0)
+    if (((data->fan_channel_valid_field[channel / 8] >> (channel % 8)) & 0x01) == 0)
     {
       return 1;
     }
@@ -754,7 +762,7 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   mutex_lock(&data->mutex);
 
   // Mark this channel as checked now so that we don't have to before each return statement
-  data->fan_or_pwm_channel_checked_field |= ((uint64_t)0x01 << channel);
+  data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
 
   // Set the I/O control command structure fields for calling the ec_sys_get_fan_status function
   //   in the libuLinux_hal library via the helper program
@@ -895,12 +903,20 @@ static int qnap_ec_is_fan_or_pwm_channel_valid(struct qnap_ec_data* data, int ch
   }
 
   // Mark this channel as valid
-  data->fan_or_pwm_channel_valid_field |= ((uint64_t)0x01 << channel);
+  data->fan_channel_valid_field[channel / 8] |= (0x01 << (channel % 8));
 
   // Release the data mutex lock
   mutex_unlock(&data->mutex);
 
   return 0;
+}
+
+// Function called to check if the PWM channel number is valid
+// Note: the return value is 0 if the channel is valid, a positive value if the channel is
+//       invalid, and a negative value if an error occurred
+static int qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, int channel)
+{
+  return 1;
 }
 
 // Function called to check if the temperature channel number is valid
@@ -919,10 +935,10 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   //       value of 0 to signal that everything is correct
 
   // Check if this channel has already been checked
-  if (((data->temp_channel_checked_field >> channel) & 0x01) == 1)
+  if (((data->temp_channel_checked_field[channel / 8] >> (channel % 8)) & 0x01) == 1)
   {
     // Check if this channel is invalid
-    if (((data->temp_channel_valid_field >> channel) & 0x01) == 0)
+    if (((data->temp_channel_valid_field[channel / 8] >> (channel % 8)) & 0x01) == 0)
     {
       return 1;
     }
@@ -934,7 +950,7 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   mutex_lock(&data->mutex);
 
   // Mark this channel as checked now so that we don't have to before each return statement
-  data->temp_channel_checked_field |= ((uint64_t)0x01 << channel);
+  data->temp_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
 
   // Set the I/O control command structure fields for calling the ec_sys_get_temperature function
   //   in the libuLinux_hal library via the helper program
@@ -985,7 +1001,7 @@ static int qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, int channel)
   }
 
   // Mark this channel as valid
-  data->temp_channel_valid_field |= ((uint64_t)0x01 << channel);
+  data->temp_channel_valid_field[channel / 8] |= (0x01 << (channel % 8));
 
   // Release the data mutex lock
   mutex_unlock(&data->mutex);
