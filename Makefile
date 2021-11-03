@@ -82,7 +82,7 @@ install: clean helper module
 	$(INSTALL_COMMAND) $(LIBRARY_BINARY_FILE) $(LIBRARY_COMPILED_PATH)/$(LIBRARY_BINARY_FILE)
 	$(INSTALL_COMMAND) --strip $(HELPER_BINARY_FILE) $(HELPER_COMPILED_PATH)/$(HELPER_BINARY_FILE)
 	$(MAKE) -C $(KDIR) M=$(PWD) modules_install
-	$(DEPMOD_COMMAND) --all
+	$(DEPMOD_COMMAND) --quick
 	-$(MODPROBE_COMMAND) $(MODULE_NAME)
 
 # Define the package target

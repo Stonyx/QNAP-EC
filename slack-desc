@@ -1,0 +1,7 @@
+       |-----handy-ruler------------------------------------------------------|
+qnap-ec: QNAP-EC - HWMon Driver for QNAP IT8528 E.C. Chips
+qnap-ec:
+qnap-ec: A Linux hwmon driver kernel module for the QNAP IT8528 Embedded
+qnap-ec: Controller chip (and possibly others).
+qnap-ec:
+qnap-ec: See https://github.com/Stonyx/QNAP-EC for more details.
