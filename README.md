@@ -15,7 +15,7 @@ This will compile, link, and install the needed files along with inserting the m
 
 If you would like the kernel module to skip checking for the presence of the IT8528 chip (for example to run it on a QNAP NAS unit with a different chip to see if this driver will work) run the following command when inserting the module into the kernel:
 ```
-sudo modprobe qnap-ec skip-check=yes
+sudo modprobe qnap-ec check-for-chip=no
 ```
 
 For development purposes there is a simulated libuLinux_hal library included that can be used when developing on a machine that doesn’t have a compatible embedded controller chip.  To build the simulated library run the following command:
