@@ -68,6 +68,7 @@ struct qnap_ec_data {
   uint8_t fan_channel_valid_field[QNAP_EC_NUMBER_OF_FAN_CHANNELS / 8];
   uint8_t pwm_channel_checked_field[QNAP_EC_NUMBER_OF_PWM_CHANNELS / 8];
   uint8_t pwm_channel_valid_field[QNAP_EC_NUMBER_OF_PWM_CHANNELS / 8];
+  uint8_t pwm_enable_value_field[QNAP_EC_NUMBER_OF_PWM_CHANNELS / 8];
   uint8_t temp_channel_checked_field[QNAP_EC_NUMBER_OF_TEMP_CHANNELS / 8];
   uint8_t temp_channel_valid_field[QNAP_EC_NUMBER_OF_TEMP_CHANNELS / 8];
 };
@@ -327,9 +328,13 @@ static int qnap_ec_probe(struct platform_device* platform_dev)
   if (data == NULL)
     return -ENOMEM;
 
-  // Initialize the data mutex and set the devices pointer
+  // Initialize the data mutex, set the devices pointer, and if we are simulating the PWM enable
+  //   attribute set the PWM enable values
   mutex_init(&data->mutex);
   data->devices = qnap_ec_devices;
+  if (qnap_ec_sim_pwm_enable)
+    for (i = 0; i < QNAP_EC_NUMBER_OF_PWM_CHANNELS / 8; ++i)
+      data->pwm_enable_value_field[i] = 0xFF;
 
   // Set the custom device data to the data structure
   // Note: this needs to be done before registering the hwmon device so that the data is accessible
@@ -473,9 +478,12 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
       switch (attribute)
       {
         case hwmon_pwm_enable:
-          // Check if we are not simulating the enable attribute or this PWM channel is invalid
+          // Check if we are not simulating the PWM enable attribute or this PWM channel is invalid
           if (!qnap_ec_sim_pwm_enable || !qnap_ec_is_pwm_channel_valid(data, channel))
             return -EOPNOTSUPP;
+
+          // Set the value to the PWM enable value
+          *value = (data->pwm_enable_value_field[channel / 8] >> (channel % 8)) & 0x01;
 
           break;
         case hwmon_pwm_input:
@@ -509,23 +517,17 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           // Call the ec_sys_get_temperature function in the libuLinux_hal library
           // Note: we are using an int64 variable instead of a double variable because floating
           //       point math (including casting) is not possible in kernel space
-          // Note: because an int64 value can hold a 19 digit integer while a double value can hold
-          //       a 16 digit integer without loosing precision in the helper program we multiple
-          //       the double value by 1000 to move three digits after the decimal point to before
-          //       the decimal point and still fit the value in an int64 value and preserve three
-          //       digits after the decimal point however because we need to return a millidegree
-          //       value there is no need to divide by 1000
           if (qnap_ec_call_lib_function(true, data, int8_func_uint8_doublepointer,
               "ec_sys_get_temperature", channel, NULL, NULL, &temperature, true) != 0)
             return -ENODATA;
 
           // Set the value to the returned temperature
-          // Note: because an int64 value can hold a 19 digit integer while a double value can hold
-          //       a 16 digit integer without loosing precision in the helper program we multiple
-          //       the double value by 1000 to move three digits after the decimal point to before
-          //       the decimal point and still fit the value in an int64 value and preserve three
-          //       digits after the decimal point however because we need to return a millidegree
-          //       value there is no need to divide by 1000
+          // Note: because an int64 variable can hold a 19 digit integer while a double variable can
+          //       hold a 16 digit integer without loosing precision in the helper program we
+          //       multiple the double value by 1000 to move three digits after the decimal point to
+          //       before the decimal point and still fit the value in an int64 variable and
+          //       preserve three digits after the decimal point however because we need to return a
+          //       millidegree value there is no need to divide by 1000
           *value = temperature;
 
           break;
@@ -562,11 +564,40 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
           if (!qnap_ec_sim_pwm_enable || !qnap_ec_is_pwm_channel_valid(data, channel))
             return -EOPNOTSUPP;
 
+          // Check if the value is invalid
+          if (value < 0 || value > 1)
+            return -EOPNOTSUPP;
+
+          // Check if the value is 0
+          if (value == 0)
+          {
+            // Set the PWM enable value
+            data->pwm_enable_value_field[channel / 8] &= ~(0x01 << (channel % 8));
+
+            // Set the fan PWM to full and call the ec_sys_set_fan_speed function in the
+            //   libuLinux_hal library
+            fan_pwm = 255;
+            if (qnap_ec_call_lib_function(true, data, int8_func_uint8_uint8,
+                "ec_sys_set_fan_speed", channel, &fan_pwm, NULL, NULL, true) != 0)
+              return -EOPNOTSUPP;
+          }
+          else // if (value == 1)
+          {
+            // Set the PWM enable value
+            data->pwm_enable_value_field[channel / 8] |= (0x01 << (channel % 8));
+          }
+
           break;
         case hwmon_pwm_input:
-          // Check if this PWM channel is invalid
-          if (!qnap_ec_is_pwm_channel_valid(data, channel))
+          // Check if this PWM channel is invalid or if we are simulating the PWM enable attribute
+          //   and fan PWM is not enabled for this channel
+          if (!qnap_ec_is_pwm_channel_valid(data, channel) || (qnap_ec_sim_pwm_enable &&
+             ((data->pwm_enable_value_field[channel / 8] >> (channel % 8)) & 0x01) == 0))
             return -EOPNOTSUPP;
+
+          // Check if the value is invalid
+          if (value < 0 || value > 255)
+            return -EOVERFLOW;
 
           // Call the ec_sys_set_fan_speed function in the libuLinux_hal library
           if (qnap_ec_call_lib_function(true, data, int8_func_uint8_uint8, "ec_sys_set_fan_speed",
@@ -722,7 +753,7 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
   //         increase/decrease the fan PWM
   //       - if the function return value is non zero then the channel is invalid
   //       - loop through all channels that have not been checked and have the same initial fan PWM
-  //         value as the channel being validated and read the changed fan PWM by calling the
+  //         as the channel being validated and read the changed fan PWM by calling the
   //         ec_sys_get_fan_speed function in the libuLinux_hal library
   //       - if the function return value is non zero for a channel then the channel is invalid
   //       - if the returned fan PWM for a channel is greater than 255 then the channel is invalid
@@ -910,8 +941,8 @@ static int qnap_ec_is_pwm_channel_valid_read_fan_pwms(struct qnap_ec_data* data,
       continue;
     }
 
-    // Check if the changed fan PWMs pointer is NULL (ie: this is the first read) and set the
-    //   appropriate array's value for this channel
+    // Check if the changed fan PWMs pointer is NULL (ie: this is the first read) and use the
+    //   appropriate array for this channel
     if (changed_fan_pwms == NULL)
       initial_fan_pwms[j] = fan_pwm;
     else
