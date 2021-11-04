@@ -34,7 +34,7 @@ MODULE_VERSION("1.1.0");
 MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
 MODULE_PARM_DESC(val_pwm_channels, "Validate PWM channels");
-MODULE_PARM_DESC(sim_pwm_enable, "Simulate pwmX_enable sysfs attribute");
+MODULE_PARM_DESC(sim_pwm_enable, "Simulate pwmX_enable sysfs attributes");
 MODULE_PARM_DESC(check_for_chip, "Check for QNAP IT8528 E.C. chip");
 
 // Define maximum number of possible channels
@@ -85,10 +85,14 @@ static int qnap_ec_hwmon_write(struct device* dev, enum hwmon_sensor_types type,
 static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t channel);
 static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t channel);
 static bool qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, uint8_t channel);
-static int qnap_ec_is_pwm_channel_valid_read_pwm_values(struct qnap_ec_data* data, uint8_t channel,
-                                                        uint8_t initial_pwm_values[],
-                                                        uint8_t changed_pwm_values[]);
-static int qnap_ec_call_helper(bool log_helper_error);
+static int qnap_ec_is_pwm_channel_valid_read_fan_pwms(struct qnap_ec_data* data, uint8_t channel,
+                                                      uint8_t initial_pwm_values[],
+                                                      uint8_t changed_pwm_values[]);
+static int qnap_ec_call_lib_function(bool use_mutex, struct qnap_ec_data* data,
+                                     enum qnap_ec_ioctl_function_type function_type,
+                                     char* function_name, uint8_t argument1_uint8,
+                                     uint8_t* argument2_uint8, uint32_t* argument2_uint32,
+                                     int64_t* argument2_int64, bool log_return_error);
 static int qnap_ec_misc_device_open(struct inode* inode, struct file* file);
 static long int qnap_ec_misc_device_ioctl(struct file* file, unsigned int command,
                                           unsigned long argument);
@@ -432,6 +436,9 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
                               int channel, long* value)
 {
   // Declare and/or define needed variables
+  uint32_t fan_speed;
+  uint32_t fan_pwm;
+  int64_t temperature;
   struct qnap_ec_data* data = dev_get_drvdata(device);
 
   // Switch based on the sensor type
@@ -447,23 +454,19 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           if (!qnap_ec_is_fan_channel_valid(data, channel))
             return -EOPNOTSUPP;
 
-          // Get the data mutex lock
-          mutex_lock(&data->mutex);
-
-          // Set the I/O control command structure fields for calling the ec_sys_get_fan_speed
-          //   function in the libuLinux_hal library via the helper program
-          // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
-          //       on the FIELD_SIZEOF macro which was removed from the kernel
-          data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
-          strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_speed",
-            sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint8 = channel;
-          data->ioctl_command.argument2_uint32 = 0;
+          // Call the ec_sys_get_fan_speed function in the libuLinux_hal library
+          if (qnap_ec_call_lib_function(true, data, int8_func_uint8_uint32pointer,
+              "ec_sys_get_fan_speed", channel, NULL, &fan_speed, NULL, true) != 0)
+            return -ENODATA;
+  
+          // Set the value to the returned fan speed
+          *value = fan_speed;
 
           break;
         default:
           return -EOPNOTSUPP;
       }
+
       break;
     case hwmon_pwm:
       // Switch based on the sensor attribute
@@ -480,23 +483,19 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           if (!qnap_ec_is_pwm_channel_valid(data, channel))
             return -EOPNOTSUPP;
 
-          // Get the data mutex lock
-          mutex_lock(&data->mutex);
+          // Call the ec_sys_get_fan_pwm function in the libuLinux_hal library
+          if (qnap_ec_call_lib_function(true, data, int8_func_uint8_uint32pointer,
+              "ec_sys_get_fan_pwm", channel, NULL, &fan_pwm, NULL, true) != 0)
+            return -ENODATA;
 
-          // Set the I/O control command structure fields for calling the ec_sys_get_fan_pwm
-          //   function in the libuLinux_hal library via the helper program
-          // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
-          //       on the FIELD_SIZEOF macro which was removed from the kernel
-          data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
-          strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
-            sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint8 = channel;
-          data->ioctl_command.argument2_uint32 = 0;
+          // Set the value to the returned fan PWM
+          *value = fan_pwm;
 
           break;
         default:
           return -EOPNOTSUPP;
       }
+
       break;
     case hwmon_temp:
       // Switch based on the sensor attribute
@@ -507,117 +506,37 @@ static int qnap_ec_hwmon_read(struct device* device, enum hwmon_sensor_types typ
           if (!qnap_ec_is_temp_channel_valid(data, channel))
             return -EOPNOTSUPP;
 
-          // Get the data mutex lock
-          mutex_lock(&data->mutex);
+          // Call the ec_sys_get_temperature function in the libuLinux_hal library
+          // Note: we are using an int64 variable instead of a double variable because floating
+          //       point math (including casting) is not possible in kernel space
+          // Note: because an int64 value can hold a 19 digit integer while a double value can hold
+          //       a 16 digit integer without loosing precision in the helper program we multiple
+          //       the double value by 1000 to move three digits after the decimal point to before
+          //       the decimal point and still fit the value in an int64 value and preserve three
+          //       digits after the decimal point however because we need to return a millidegree
+          //       value there is no need to divide by 1000
+          if (qnap_ec_call_lib_function(true, data, int8_func_uint8_doublepointer,
+              "ec_sys_get_temperature", channel, NULL, NULL, &temperature, true) != 0)
+            return -ENODATA;
 
-          // Set the I/O control command structure fields for calling the ec_sys_get_temperature
-          //   function in the libuLinux_hal library via the helper program
-          // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
-          //       on the FIELD_SIZEOF macro which was removed from the kernel
-          // Note: we are using an int64 field in place of a double field since floating point
-          //       math is not possible in kernel space
-          data->ioctl_command.function_type = int8_func_uint8_doublepointer;
-          strncpy(data->ioctl_command.function_name, "ec_sys_get_temperature",
-            sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint8 = channel;
-          data->ioctl_command.argument2_int64 = 0;
+          // Set the value to the returned temperature
+          // Note: because an int64 value can hold a 19 digit integer while a double value can hold
+          //       a 16 digit integer without loosing precision in the helper program we multiple
+          //       the double value by 1000 to move three digits after the decimal point to before
+          //       the decimal point and still fit the value in an int64 value and preserve three
+          //       digits after the decimal point however because we need to return a millidegree
+          //       value there is no need to divide by 1000
+          *value = temperature;
 
           break;
         default:
           return -EOPNOTSUPP;
       }
+
       break;
     default:
       return -EOPNOTSUPP;
   }
-
-  // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = true;
-
-  // Call the helper program
-  if (qnap_ec_call_helper(true) != 0)
-  {
-    // Clear the open device flag
-    data->devices->open_misc_device = false;
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return -ENODATA;
-  }
-
-  // Clear the open device flag
-  data->devices->open_misc_device = false;
-
-  // Check if the called function returned any errors
-  if (data->ioctl_command.return_value_int8 != 0)
-  {
-    // Log the error
-    printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
-      "a non zero value (%i)", data->ioctl_command.function_name,
-      data->ioctl_command.return_value_int8);
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return -ENODATA;
-  }
-
-  // Switch based on the sensor type
-  // Note: we are using a switch statements to match the switch statement above with the exception
-  //       of error cases
-  switch (type)
-  {
-    case hwmon_fan:
-      // Switch based on the sensor attribute
-      switch (attribute)
-      {
-        case hwmon_fan_input:
-          // Set the value to the returned fan speed value
-          *value = data->ioctl_command.argument2_uint32;
-
-          break;
-      }
-      break;
-    case hwmon_pwm:
-      // Switch based on the sensor attribute
-      switch (attribute)
-      {
-        case hwmon_pwm_enable:
-          break;
-        case hwmon_pwm_input:
-          // Set the value to the returned fan PWM value
-          *value = data->ioctl_command.argument2_uint32;
-
-          break;
-      }
-      break;
-    case hwmon_temp:
-      // Switch based on the sensor attribute
-      switch (attribute)
-      {
-        case hwmon_temp_input:
-          // Set the value to the returned temperature value
-          // Note: we are using an int64 field instead of a double field because floating point
-          //       math is not possible in kernel space and because an int64 value can hold a 19
-          //       digit integer while a double value can hold a 16 digit integer without loosing
-          //       precision we can multiple the double value by 1000 to move three digits after
-          //       the decimal point to before the decimal point and still fit the value in an
-          //       int64 value and preserve three digits after the decimal point however because
-          //       we need to return a millidegree value there is no need to divide by 1000
-          *value = data->ioctl_command.argument2_int64;
-
-          break;
-      }
-      break;
-    // Dummy default cause to silence compiler warnings about not including all enums in switch
-    //   statement
-    default:
-      break;
-  }
-
-  // Release the data mutex lock
-  mutex_unlock(&data->mutex);
 
   return 0;
 }
@@ -627,6 +546,7 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
                                int channel, long value)
 {
   // Declare and/or define needed variables
+  uint8_t fan_pwm = value;
   struct qnap_ec_data* data = dev_get_drvdata(device);
 
   // Switch based on the sensor type
@@ -648,68 +568,20 @@ static int qnap_ec_hwmon_write(struct device* device, enum hwmon_sensor_types ty
           if (!qnap_ec_is_pwm_channel_valid(data, channel))
             return -EOPNOTSUPP;
 
-          // Get the data mutex lock
-          mutex_lock(&data->mutex);
-
-          // Set the I/O control command structure fields for calling the ec_sys_set_fan_speed
-          //   function in the libuLinux_hal library via the helper program
-          // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
-          //       on the FIELD_SIZEOF macro which was removed from the kernel
-          data->ioctl_command.function_type = int8_func_uint8_uint8;
-          strncpy(data->ioctl_command.function_name, "ec_sys_set_fan_speed",
-            sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-          data->ioctl_command.argument1_uint8 = channel;
-          data->ioctl_command.argument2_uint8 = value;
+          // Call the ec_sys_set_fan_speed function in the libuLinux_hal library
+          if (qnap_ec_call_lib_function(true, data, int8_func_uint8_uint8, "ec_sys_set_fan_speed",
+              channel, &fan_pwm, NULL, NULL, true) != 0)
+            return -EOPNOTSUPP;
 
           break;
         default:
           return -EOPNOTSUPP;
       }
+
       break;
     default:
       return -EOPNOTSUPP;
   }
-
-  // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = true;
-
-  // Call the helper program
-  if (qnap_ec_call_helper(true) != 0)
-  {
-    // Clear the open device flag
-    data->devices->open_misc_device = false;
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    // Note: the "bad exchange" error code seems to be the closest code to describe this error
-    //       condition (ie: the exchange of information between the kernel module and the helper
-    //       program went bad)
-    return -EBADE;
-  }
-
-  // Clear the open device flag
-  data->devices->open_misc_device = false;
-
-  // Check if the called function returned any errors
-  if (data->ioctl_command.return_value_int8 != 0)
-  {
-    // Log the error
-    printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
-      "a non zero value (%i)", data->ioctl_command.function_name,
-      data->ioctl_command.return_value_int8);
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    // Note: the "bad exchange" error code seems to be the closest code to describe this error
-    //       condition (ie: the exchange of information between the kernel module and the helper
-    //       program went bad)
-    return -EBADE;
-  }
-
-  // Release the data mutex lock
-  mutex_unlock(&data->mutex);
 
   return 0;
 }
@@ -720,14 +592,19 @@ static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t chan
   // Note: based on testing the logic to determining if a fan channel is valid is:
   //       - call the ec_sys_get_fan_status function in the libuLinux_hal library
   //       - if the function return value is non zero then the channel is invalid
-  //       - if the returned fan status value is non zero then the channel is invalid
+  //       - if the returned fan status is non zero then the channel is invalid
   //       - call the ec_sys_get_fan_speed function in the libuLinux_hal library
   //       - if the function return value is non zero then the channel is invalid
-  //       - if the returned fan speed value is 65535 then the channel is invalid
+  //       - if the returned fan speed is 65535 then the channel is invalid
   //       - call the ec_sys_get_fan_pwm function in the libuLinux_hal library
   //       - if the function return value is non zero then the channel is invalid
-  //       - if the returned fan PWM value is greater than 255 then the channel is invalid
+  //       - if the returned fan PWM is greater than 255 then the channel is invalid
   //       - mark the channel as valid
+
+  // Declare needed variables
+  uint32_t fan_status;
+  uint32_t fan_speed;
+  uint32_t fan_pwm;
 
   // Check if this channel has already been checked
   if (((data->fan_channel_checked_field[channel / 8] >> (channel % 8)) & 0x01) == 1)
@@ -742,39 +619,11 @@ static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t chan
   // Get the data mutex lock
   mutex_lock(&data->mutex);
 
-  // Set the I/O control command structure fields for calling the ec_sys_get_fan_status function
-  //   in the libuLinux_hal library via the helper program
-  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
-  //       FIELD_SIZEOF macro which was removed from the kernel
-  data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
-  strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_status",
-    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-  data->ioctl_command.argument1_uint8 = channel;
-  data->ioctl_command.argument2_uint32 = 0;
-
-  // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = true;
-
-  // Call the helper program
-  if (qnap_ec_call_helper(false) != 0)
-  {
-    // Clear the open device flag
-    data->devices->open_misc_device = false;
-
-    // Mark this channel as checked (and invalid by default)
-    data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return false;
-  }
-
-  // Clear the open device flag
-  data->devices->open_misc_device = false;
-
-  // Check if the called function return value is non zero
-  if (data->ioctl_command.return_value_int8 != 0)
+  // Set the fan status to an invalid value (to verify that the called function changed the value)
+  //   and call the ec_sys_get_fan_status function in the libuLinux_hal library
+  fan_status = 1;
+  if (qnap_ec_call_lib_function(false, data, int8_func_uint8_uint32pointer, "ec_sys_get_fan_status",
+      channel, NULL, &fan_status, NULL, false) != 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -785,8 +634,8 @@ static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
-  // Check if the returned status value is non zero
-  if (data->ioctl_command.argument2_uint32 != 0)
+  // Check if the returned status is non zero
+  if (fan_status != 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -797,39 +646,11 @@ static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
-  // Set the I/O control command structure fields for calling the ec_sys_get_fan_speed function
-  //   in the libuLinux_hal library via the helper program
-  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
-  //       FIELD_SIZEOF macro which was removed from the kernel
-  data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
-  strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_speed",
-    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-  data->ioctl_command.argument1_uint8 = channel;
-  data->ioctl_command.argument2_uint32 = 0;
-
-  // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = true;
-
-  // Call the helper program
-  if (qnap_ec_call_helper(false) != 0)
-  {
-    // Clear the open device flag
-    data->devices->open_misc_device = false;
-
-    // Mark this channel as checked (and invalid by default)
-    data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return false;
-  }
-
-  // Clear the open device flag
-  data->devices->open_misc_device = false;
-
-  // Check if the called function return value is non zero
-  if (data->ioctl_command.return_value_int8 != 0)
+  // Set the fan speed to an invalid value (to verify that the called function changed the value)
+  //   and call the ec_sys_get_fan_speed function in the libu_Linux_hal library
+  fan_speed = 65535;
+  if (qnap_ec_call_lib_function(false, data, int8_func_uint8_uint32pointer, "ec_sys_get_fan_speed",
+      channel, NULL, &fan_speed, NULL, false) != 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -840,8 +661,8 @@ static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
-  // Check if the returned fan speed value is 65535
-  if (data->ioctl_command.argument2_uint32 == 65535)
+  // Check if the returned fan speed is 65535
+  if (fan_speed == 65535)
   {
     // Mark this channel as checked (and invalid by default)
     data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -852,39 +673,11 @@ static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
-  // Set the I/O control command structure fields for calling the ec_sys_get_fan_pwm function
-  //   in the libuLinux_hal library via the helper program
-  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
-  //       FIELD_SIZEOF macro which was removed from the kernel
-  data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
-  strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
-    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-  data->ioctl_command.argument1_uint8 = channel;
-  data->ioctl_command.argument2_uint32 = 0;
-
-  // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = true;
-
-  // Call the helper program
-  if (qnap_ec_call_helper(false) != 0)
-  {
-    // Clear the open device flag
-    data->devices->open_misc_device = false;
-
-    // Mark this channel as checked (and invalid by default)
-    data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return false;
-  }
-
-  // Clear the open device flag
-  data->devices->open_misc_device = false;
-
-  // Check if the called function return value is non zero
-  if (data->ioctl_command.return_value_int8 != 0)
+  // Set the fan PWM to an invalid value (to verify that the called function changed the value)
+  //   and call the ec_sys_get_fan_pwm function in the libuLinux_hal library
+  fan_pwm = 256;
+  if (qnap_ec_call_lib_function(false, data, int8_func_uint8_uint32pointer, "ec_sys_get_fan_pwm",
+      channel, NULL, &fan_pwm, NULL, false) != 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -895,8 +688,8 @@ static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
-  // Check if the returned fan PWM value is invalid
-  if (data->ioctl_command.argument2_uint32 > 255)
+  // Check if the returned fan PWM is greater than 255
+  if (fan_pwm > 255)
   {
     // Mark this channel as checked (and invalid by default)
     data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -921,33 +714,36 @@ static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t chan
 static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t channel)
 {
   // Note: based on testing the logic to determine if a PWM channel is valid is:
-  //       - loop through all channels that have not been checked and read the initial fan PWM value
-  //         by calling the ec_sys_get_fan_speed function in the libuLinux_hal library
+  //       - loop through all channels that have not been checked and read the initial fan PWM by
+  //         calling the ec_sys_get_fan_speed function in the libuLinux_hal library
   //       - if the function return value is non zero for a channel then the channel is invalid
-  //       - if the returned fan PWM value for a channel is greater than 255 then the channel is
-  //         invalid
+  //       - if the returned fan PWM for a channel is greater than 255 then the channel is invalid
   //       - call the ec_sys_set_fan_speed function in the libuLinux_hal library to
-  //         increase/decrease the fan PWM value
+  //         increase/decrease the fan PWM
   //       - if the function return value is non zero then the channel is invalid
   //       - loop through all channels that have not been checked and have the same initial fan PWM
-  //         value as the channel being validated and read the changed fan PWM value by calling the
+  //         value as the channel being validated and read the changed fan PWM by calling the
   //         ec_sys_get_fan_speed function in the libuLinux_hal library
   //       - if the function return value is non zero for a channel then the channel is invalid
-  //       - if the returned fan PWM value for a channel is greater than 255 then the channel is
-  //         invalid
+  //       - if the returned fan PWM for a channel is greater than 255 then the channel is invalid
   //       - call the ec_sys_set_fan_speed function in the libuLinux_hal library to reset the fan
-  //         PWM value
+  //         PWM
   //       - if the function return value is non zero then the channel is invalid
   //       - loop through all channels that have not been checked and have the same initial fan PWM
-  //         value as the channel being validated and have the same changed fan PWM value as the
-  //         channel being validated and mark the lowest numerical channel as valid and mark the
-  //         other channels as invalid
+  //         as the channel being validated and have the same changed fan PWM as the channel being
+  //         validated and mark the lowest numerical channel as valid and mark the other
+  //         channels as invalid
 
   // Declare and/or define needed variables
   uint8_t i;
+  uint8_t fan_pwm;
   bool valid_channel_marked = false;
-  uint8_t initial_pwm_values[QNAP_EC_NUMBER_OF_PWM_CHANNELS];
-  uint8_t changed_pwm_values[QNAP_EC_NUMBER_OF_PWM_CHANNELS];
+  uint8_t initial_fan_pwms[QNAP_EC_NUMBER_OF_PWM_CHANNELS];
+  uint8_t changed_fan_pwms[QNAP_EC_NUMBER_OF_PWM_CHANNELS];
+
+  // Check if we should not be validating PWM channels and should mimic the fan channels
+  if (!qnap_ec_val_pwm_channels)
+    return qnap_ec_is_fan_channel_valid(data, channel);
 
   // Check if this channel has already been checked
   if (((data->pwm_channel_checked_field[channel / 8] >> (channel % 8)) & 0x01) == 1)
@@ -962,8 +758,8 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
   // Get the data mutex lock
   mutex_lock(&data->mutex);
 
-  // Read the intial PWM values
-  if (qnap_ec_is_pwm_channel_valid_read_pwm_values(data, channel, initial_pwm_values, NULL) != 0)
+  // Read the intial fan PWMs
+  if (qnap_ec_is_pwm_channel_valid_read_fan_pwms(data, channel, initial_fan_pwms, NULL) != 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->pwm_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -974,43 +770,15 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
-  // Set the I/O control command structure fields for calling the ec_sys_set_fan_speed function in
-  //   the libuLinux_hal library via the helper program in order to increase/decrease the fan PWM
-  //   value by 5 (~ 2%)
-  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
-  //       FIELD_SIZEOF macro which was removed from the kernel
-  data->ioctl_command.function_type = int8_func_uint8_uint8;
-  strncpy(data->ioctl_command.function_name, "ec_sys_set_fan_speed",
-    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-  data->ioctl_command.argument1_uint8 = channel;
-  if (initial_pwm_values[channel] <= 250)
-    data->ioctl_command.argument2_uint8 = initial_pwm_values[channel] + 5;
+  // Check if the initial fan PWM is less than or equal to 250 and change the fan PWM accordingly
+  if (initial_fan_pwms[channel] <= 250)
+    fan_pwm = initial_fan_pwms[channel] + 5;
   else
-    data->ioctl_command.argument2_uint8 = initial_pwm_values[channel] - 5;
+    fan_pwm = initial_fan_pwms[channel] - 5;
 
-  // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = true;
-
-  // Call the helper program
-  if (qnap_ec_call_helper(false) != 0)
-  {
-    // Clear the open device flag
-    data->devices->open_misc_device = false;
-
-    // Mark this channel as checked (and invalid by default)
-    data->pwm_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return false;
-  }
-
-  // Clear the open device flag
-  data->devices->open_misc_device = false;
-
-  // Check if the called function returned any errors
-  if (data->ioctl_command.return_value_int8 != 0)
+  // Call the ec_sys_set_fan_speed function in the libuLinux_hal library
+  if (qnap_ec_call_lib_function(false, data, int8_func_uint8_uint8, "ec_sys_set_fan_speed", channel,
+      &fan_pwm, NULL, NULL, false) != 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->pwm_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -1021,9 +789,9 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
-  // Read the changed PWM values
-  if (qnap_ec_is_pwm_channel_valid_read_pwm_values(data, channel, initial_pwm_values,
-      changed_pwm_values) != 0)
+  // Read the changed fan PWMs
+  if (qnap_ec_is_pwm_channel_valid_read_fan_pwms(data, channel, initial_fan_pwms,
+      changed_fan_pwms) != 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->pwm_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -1034,40 +802,11 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
-  // Set the I/O control command structure fields for calling the ec_sys_set_fan_speed function in
-  //   the libuLinux_hal library via the helper program in order to reset the fan PWM value to the
-  //   initial fan PWM value
-  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
-  //       FIELD_SIZEOF macro which was removed from the kernel
-  data->ioctl_command.function_type = int8_func_uint8_uint8;
-  strncpy(data->ioctl_command.function_name, "ec_sys_set_fan_speed",
-    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-  data->ioctl_command.argument1_uint8 = channel;
-  data->ioctl_command.argument2_uint8 = initial_pwm_values[channel];
-
-  // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = true;
-
-  // Call the helper program
-  if (qnap_ec_call_helper(false) != 0)
-  {
-    // Clear the open device flag
-    data->devices->open_misc_device = false;
-
-    // Mark this channel as checked (and invalid by default)
-    data->pwm_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return false;
-  }
-
-  // Clear the open device flag
-  data->devices->open_misc_device = false;
-
-  // Check if the called function returned any errors
-  if (data->ioctl_command.return_value_int8 != 0)
+  // Set the fan PWM to the initial fan PWM and call the ec_sys_set_fan_speed function in the
+  //   libuLinux_hal library
+  fan_pwm = initial_fan_pwms[channel];
+  if (qnap_ec_call_lib_function(false, data, int8_func_uint8_uint8, "ec_sys_set_fan_speed", channel,
+      &fan_pwm, NULL, NULL, false) != 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->pwm_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -1085,14 +824,12 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
     if (((data->pwm_channel_checked_field[i / 8] >> (i % 8)) & 0x01) == 1)
       continue;
 
-    // Check if this channel does not have the same intial fan PWM value as the channel being
-    //   validated
-    if (initial_pwm_values[i] != initial_pwm_values[channel])
+    // Check if this channel does not have the same intial fan PWM as the channel being validated
+    if (initial_fan_pwms[i] != initial_fan_pwms[channel])
       continue;
 
-    // Check if this channel does not have the same changed fan PWM value as the channel being
-    //   validated
-    if (changed_pwm_values[i] != changed_pwm_values[channel])
+    // Check if this channel does not have the same changed fan PWM as the channel being validated
+    if (changed_fan_pwms[i] != changed_fan_pwms[channel])
       continue;
 
     // Check if a valid channel has not yet been marked in this group
@@ -1119,14 +856,15 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
   return true;
 }
 
-// Function called by the qnap_ec_is_pwm_channel_valid function to read the fan PWM values
-static int qnap_ec_is_pwm_channel_valid_read_pwm_values(struct qnap_ec_data* data, uint8_t channel,
-                                                        uint8_t initial_pwm_values[],
-                                                        uint8_t changed_pwm_values[])
+// Function called by the qnap_ec_is_pwm_channel_valid function to read the fan PWMs
+static int qnap_ec_is_pwm_channel_valid_read_fan_pwms(struct qnap_ec_data* data, uint8_t channel,
+                                                      uint8_t initial_fan_pwms[],
+                                                      uint8_t changed_fan_pwms[])
 {
   // Declare needed variables
   uint8_t i;
   uint8_t j;
+  uint32_t fan_pwm;
 
   // Loop through all the channels starting at the channel being validated
   for (i = 0, j = channel; i < QNAP_EC_NUMBER_OF_PWM_CHANNELS; ++i, j = (j + 1) %
@@ -1136,31 +874,18 @@ static int qnap_ec_is_pwm_channel_valid_read_pwm_values(struct qnap_ec_data* dat
     if (((data->pwm_channel_checked_field[j / 8] >> (j % 8)) & 0x01) == 1)
       continue;
 
-    // Check if the changed PWM values pointer is not NULL (ie: this is the second read) and if
-    //   this channel does not have the same initial fan PWM value as the channel being validated
-    if (changed_pwm_values != NULL && initial_pwm_values[j] != initial_pwm_values[channel])
+    // Check if the changed fan PWMs pointer is not NULL (ie: this is the second read) and if
+    //   this channel does not have the same initial fan PWM as the channel being validated
+    if (changed_fan_pwms != NULL && initial_fan_pwms[j] != initial_fan_pwms[channel])
       continue;
 
-    // Set the I/O control command structure fields for calling the ec_sys_get_fan_pwm
-    //   function in the libuLinux_hal library via the helper program
-    // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based
-    //       on the FIELD_SIZEOF macro which was removed from the kernel
-    data->ioctl_command.function_type = int8_func_uint8_uint32pointer;
-    strncpy(data->ioctl_command.function_name, "ec_sys_get_fan_pwm",
-      sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-    data->ioctl_command.argument1_uint8 = channel;
-    data->ioctl_command.argument2_uint32 = 0;
-
-    // Set the open device flag to allow return communication by the helper program
-    data->devices->open_misc_device = true;
-
-    // Call the helper program
-    if (qnap_ec_call_helper(false) != 0)
+    // Set the fan PWM to a predictable value and call the ec_sys_get_fan_pwm function in the
+    //   libuLinux_hal library
+    fan_pwm = 0;
+    if (qnap_ec_call_lib_function(false, data, int8_func_uint8_uint32pointer, "ec_sys_get_fan_pwm",
+        channel, NULL, &fan_pwm, NULL, false) != 0)
     {
-      // Clear the open device flag
-      data->devices->open_misc_device = false;
-
-      // Check if this is the channel that is being validated and we should just return instead of
+      // Check if this is the channel that is being validated and we should return instead of
       //   continuing in the loop
       if (j == channel)
         return -ENODATA;
@@ -1171,29 +896,26 @@ static int qnap_ec_is_pwm_channel_valid_read_pwm_values(struct qnap_ec_data* dat
       continue;
     }
 
-    // Clear the open device flag
-    data->devices->open_misc_device = false;
-
-    // Check if the called function returned any errors
-    if (data->ioctl_command.return_value_int8 != 0)
+    // Check if the returned fan PWM is greater than 255
+    if (fan_pwm > 255)
     {
-      // Check if this is the channel that is being validated and we should just return instead of
+      // Check if this is the channel that is being validated and we should return instead of
       //   continuing in the loop
       if (j == channel)
         return -ENODATA;
 
       // Mark this channel as checked (and invalid by default)
       data->pwm_channel_checked_field[j / 8] |= (0x01 << (j % 8));
-
+      
       continue;
     }
 
-    // Check if the changed PWM values pointer is NULL (ie: this is the first read) and set the
+    // Check if the changed fan PWMs pointer is NULL (ie: this is the first read) and set the
     //   appropriate array's value for this channel
-    if (changed_pwm_values == NULL)
-      initial_pwm_values[j] = data->ioctl_command.argument2_uint32;
+    if (changed_fan_pwms == NULL)
+      initial_fan_pwms[j] = fan_pwm;
     else
-      changed_pwm_values[j] = data->ioctl_command.argument2_uint32;
+      changed_fan_pwms[j] = fan_pwm;
   }
 
   return 0;
@@ -1205,8 +927,11 @@ static bool qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, uint8_t cha
   // Note: based on testing the logic to determining if a temperature channel is valid is:
   //       - call the ec_sys_get_temperature function in the libuLinux_hal library
   //       - if the function return value is non zero then the channel is invalid
-  //       - if the returned temperature value is negative then the channel is invalid
+  //       - if the returned temperature is negative then the channel is invalid
   //       - mark the channel as valid
+
+  // Declare any needed variables
+  int64_t temperature;
 
   // Check if this channel has already been checked
   if (((data->temp_channel_checked_field[channel / 8] >> (channel % 8)) & 0x01) == 1)
@@ -1221,41 +946,11 @@ static bool qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, uint8_t cha
   // Get the data mutex lock
   mutex_lock(&data->mutex);
 
-  // Set the I/O control command structure fields for calling the ec_sys_get_temperature function
-  //   in the libuLinux_hal library via the helper program
-  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
-  //       FIELD_SIZEOF macro which was removed from the kernel
-  // Note: we are using an int64 field in place of a double field since floating point math is not
-  //       possible in kernel space
-  data->ioctl_command.function_type = int8_func_uint8_doublepointer;
-  strncpy(data->ioctl_command.function_name, "ec_sys_get_temperature",
-    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
-  data->ioctl_command.argument1_uint8 = channel;
-  data->ioctl_command.argument2_int64 = 0;
-
-  // Set the open device flag to allow return communication by the helper program
-  data->devices->open_misc_device = true;
-
-  // Call the helper program
-  if (qnap_ec_call_helper(false) != 0)
-  {
-    // Clear the open device flag
-    data->devices->open_misc_device = false;
-
-    // Mark this channel as checked (and invalid by default)
-    data->temp_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
-
-    // Release the data mutex lock
-    mutex_unlock(&data->mutex);
-
-    return false;
-  }
-
-  // Clear the open device flag
-  data->devices->open_misc_device = false;
-
-  // Check if the called function return value is non zero
-  if (data->ioctl_command.return_value_int8 != 0)
+  // Set the temperature to an invalid value (to verify that the called function changed the value)
+  //   and call the ec_sys_get_temperature function in the libuLinux_hal library
+  temperature = -1;
+  if (qnap_ec_call_lib_function(false, data, int8_func_uint8_doublepointer,
+      "ec_sys_get_temperature", channel, NULL, NULL, &temperature, false) != 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->temp_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -1266,8 +961,8 @@ static bool qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, uint8_t cha
     return false;
   }
 
-  // Check if the returned temperature value is negative
-  if (data->ioctl_command.argument2_int64 < 0)
+  // Check if the returned temperature is negative
+  if (temperature < 0)
   {
     // Mark this channel as checked (and invalid by default)
     data->temp_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
@@ -1288,14 +983,21 @@ static bool qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, uint8_t cha
   return true;
 }
 
-// Function called to call the user space helper program
+// Function called to call a function in the libuLinux_hal library via the user space helper program
 // Note: the return value is the call_usermodehelper function's error code if an error code was
 //       returned or if successful the return value is the user space helper program's error code
-//       if an error code was returned or if successful the return value is zero
-static int qnap_ec_call_helper(bool log_helper_error)
+//       if an error code was returned or is the return value is the libuLinux_hal library
+//       function's error code if an error code was return or if successful the return value is zero
+// Note: we are using an int64 function argument in place of a double since floating point math
+//       (including casting) is not possible in kernel space
+static int qnap_ec_call_lib_function(bool use_mutex, struct qnap_ec_data* data,
+                                     enum qnap_ec_ioctl_function_type function_type,
+                                     char* function_name, uint8_t argument1_uint8,
+                                     uint8_t* argument2_uint8, uint32_t* argument2_uint32,
+                                     int64_t* argument2_int64, bool log_return_error)
 {
   // Declare and/or define needed variables
-  uint8_t i = 0;
+  uint8_t i;
   int return_value;
 #ifdef PACKAGE
   char* paths[] = { "/usr/sbin/qnap-ec", "/usr/bin/qnap-ec", "/sbin/qnap-ec", "/bin/qnap-ec" };
@@ -1304,9 +1006,31 @@ static int qnap_ec_call_helper(bool log_helper_error)
     "/usr/bin/qnap-ec", "/sbin/qnap-ec", "/bin/qnap-ec" };
 #endif
 
+  // Check if we should use the mutex and get the data mutex lock
+  if (use_mutex)
+    mutex_lock(&data->mutex);
+
+  // Set the I/O control command structure fields for calling the function in the libuLinux_hal
+  //   library via the helper program
+  // Note: "sizeof(((struct qnap_ec_ioctl_command*)0)->function_name)" statement is based on the
+  //       FIELD_SIZEOF macro which was removed from the kernel
+  data->ioctl_command.function_type = function_type;
+  strncpy(data->ioctl_command.function_name, function_name,
+    sizeof(((struct qnap_ec_ioctl_command*)0)->function_name) - 1);
+  data->ioctl_command.argument1_uint8 = argument1_uint8;
+  if (argument2_uint8 != NULL)
+    data->ioctl_command.argument2_uint8 = *argument2_uint8;
+  if (argument2_uint32 != NULL)
+    data->ioctl_command.argument2_uint32 = *argument2_uint32;
+  if (argument2_int64 != NULL)
+    data->ioctl_command.argument2_int64 = *argument2_int64;
+
+  // Set the open device flag to allow return communication by the helper program
+  data->devices->open_misc_device = true;
+
   // Call the user space helper program and loop through the paths while the first 8 bits of the
   //   return value contain any error codes
-  //   
+  i = 0;
   do
     return_value = call_usermodehelper(paths[i], (char*[]){ paths[i], NULL }, NULL, UMH_WAIT_PROC);
   while ((return_value & 0xFF) != 0 && ++i < sizeof(paths) / sizeof(char*));
@@ -1324,6 +1048,13 @@ static int qnap_ec_call_helper(bool log_helper_error)
       paths[5]);
 #endif
 
+    // Clear the open device flag
+    data->devices->open_misc_device = false;
+
+    // Check if we are using the mutex and release the data mutex lock
+    if (use_mutex)
+      mutex_unlock(&data->mutex);
+
     // Return the call_usermodehelper function's error code
     return return_value & 0xFF;
   }
@@ -1335,13 +1066,49 @@ static int qnap_ec_call_helper(bool log_helper_error)
     // Log the error
     // Note: the sign (+/-) of the user space helper program's error code is not returned by the
     //       call_usermodehelper function
-    if (log_helper_error)
-      printk(KERN_ERR "qnap-ec helper program exited with a non zero exit code (+/-%i)",
-        ((return_value >> 8) & 0xFF));
+    printk(KERN_ERR "qnap-ec helper program exited with a non zero exit code (+/-%i)",
+      ((return_value >> 8) & 0xFF));
+
+    // Clear the open device flag
+    data->devices->open_misc_device = false;
+
+    // Check if we are using the mutex and release the data mutex lock
+    if (use_mutex)
+      mutex_unlock(&data->mutex);
 
     // Return the user space helper program's error code
     return (return_value >> 8) & 0xFF;
   }
+
+  // Clear the open device flag
+  data->devices->open_misc_device = false;
+
+  // Check if the called function returned any errors
+  if (data->ioctl_command.return_value_int8 != 0)
+  {
+    // Check if we should log the function return error code error and log the error
+    if (log_return_error)
+      printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
+        "a non zero value (%i)", data->ioctl_command.function_name,
+        data->ioctl_command.return_value_int8);
+
+    // Check if we are using the mutex and release the data mutex lock
+    if (use_mutex)
+      mutex_unlock(&data->mutex);
+
+    // Return the function's error code
+    return data->ioctl_command.return_value_int8;
+  }
+
+  // Save any changes to the various arguments
+  if (argument2_uint32 != NULL)
+    *argument2_uint32 = data->ioctl_command.argument2_uint32;
+  if (argument2_int64 != NULL)
+    *argument2_int64 = data->ioctl_command.argument2_int64;
+
+  // Check if we are using the mutex and release the data mutex lock
+  if (use_mutex)
+    mutex_unlock(&data->mutex);
 
   return 0;
 }

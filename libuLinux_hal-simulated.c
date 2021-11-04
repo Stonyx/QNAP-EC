@@ -470,7 +470,7 @@ int8_t ec_sys_get_temperature(uint8_t channel, double* temperature)
       // Set temperature to a random number between 28 and 30
       srand(time(NULL) + 4);
       *temperature = rand() % (30 + 1 - 28) + 28;
-      return 0;      
+      return 0;
     case 1:
       *temperature = -1;
       return 0;
