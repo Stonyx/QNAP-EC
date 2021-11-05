@@ -897,7 +897,7 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
       // Mark this channel as valid
       data->pwm_channel_valid_field[i / 8] |= (0x01 << (i % 8));
 
-      // Set the marked flag
+      // Set the valid channel marked flag
       valid_channel_marked = true;
     }
   }
