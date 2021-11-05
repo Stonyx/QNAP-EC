@@ -29,6 +29,8 @@ MODULE_BINARY_FILE := qnap-ec.ko
 MODULE_PATH := /lib/modules/$(shell uname -r)/extra
 SIM_LIB_C_FILE := libuLinux_hal-simulated.c
 SIM_LIB_BINARY_FILE := libuLinux_hal.so
+SLACK_DESC_FILE := slack-desc
+SLACK_DESC_PATH := /install
 DEPMOD_COMMAND := $(shell which depmod)
 INSTALL_COMMAND := $(shell which install)
 MODPROBE_COMMAND := $(shell which modprobe)
@@ -79,17 +81,25 @@ module:
 
 # Define the install target
 install: clean helper module
-	$(INSTALL_COMMAND) $(LIBRARY_BINARY_FILE) $(LIBRARY_COMPILED_PATH)/$(LIBRARY_BINARY_FILE)
-	$(INSTALL_COMMAND) --strip $(HELPER_BINARY_FILE) $(HELPER_COMPILED_PATH)/$(HELPER_BINARY_FILE)
+	$(INSTALL_COMMAND) --owner=root --group=root --mode=644 $(LIBRARY_BINARY_FILE) \
+	  $(LIBRARY_COMPILED_PATH)/$(LIBRARY_BINARY_FILE)
+	$(INSTALL_COMMAND) --strip --owner=root --group=root --mode=755 $(HELPER_BINARY_FILE) \
+	  $(HELPER_COMPILED_PATH)/$(HELPER_BINARY_FILE)
 	$(MAKE) -C $(KDIR) M=$(PWD) modules_install
 	$(DEPMOD_COMMAND) --quick
 	-$(MODPROBE_COMMAND) $(MODULE_NAME)
 
 # Define the package target
 package: clean helper module
-	$(INSTALL_COMMAND) -D $(LIBRARY_BINARY_FILE) $(DESTDIR)$(LIBRARY_PACKAGED_PATH)/$(LIBRARY_BINARY_FILE)
-	$(INSTALL_COMMAND) -D --strip $(HELPER_BINARY_FILE) $(DESTDIR)$(HELPER_PACKAGED_PATH)/$(HELPER_BINARY_FILE)
+	$(INSTALL_COMMAND) --owner=root --group=root --mode=644 -D $(LIBRARY_BINARY_FILE) \
+	  $(DESTDIR)$(LIBRARY_PACKAGED_PATH)/$(LIBRARY_BINARY_FILE)
+	$(INSTALL_COMMAND) --strip --owner=root --group=root --mode=755 -D $(HELPER_BINARY_FILE) \
+	  $(DESTDIR)$(HELPER_PACKAGED_PATH)/$(HELPER_BINARY_FILE)
 	$(MAKE) -C $(KDIR) M=$(PWD) INSTALL_MOD_PATH=$(DESTDIR) modules_install
+ifdef SLACKWARE
+	$(INSTALL_COMMAND) --owner=root --group=root --mode=644 -D $(SLACK_DESC_FILE) \
+	  $(DESTDIR)$(SLACK_DESC_PATH)/$(SLACK_DESC_FILE)
+endif
 
 # Define the uninstall target
 uninstall:

@@ -165,21 +165,21 @@
  * ec_sys_get_fan_speed(35, 0) called as int8_t function(uint8_t, uint32_t*):
  * returned = 0, argument 1 after call = 35, argument 2 after call = 65535
  * ec_sys_get_fan_pwm(0, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 0, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 0, argument 2 after call = 80
  * ec_sys_get_fan_pwm(1, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 1, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 1, argument 2 after call = 80
  * ec_sys_get_fan_pwm(2, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 2, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 2, argument 2 after call = 80
  * ec_sys_get_fan_pwm(3, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 3, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 3, argument 2 after call = 80
  * ec_sys_get_fan_pwm(4, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 4, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 4, argument 2 after call = 80
  * ec_sys_get_fan_pwm(5, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 5, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 5, argument 2 after call = 80
  * ec_sys_get_fan_pwm(6, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 6, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 6, argument 2 after call = 90
  * ec_sys_get_fan_pwm(7, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 7, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 7, argument 2 after call = 90
  * ec_sys_get_fan_pwm(8, 0) called as int8_t function(uint8_t, uint32_t*):
  * returned = -1, argument 1 after call = 8, argument 2 after call = 0
  * ec_sys_get_fan_pwm(9, 0) called as int8_t function(uint8_t, uint32_t*):
@@ -205,17 +205,17 @@
  * ec_sys_get_fan_pwm(19, 0) called as int8_t function(uint8_t, uint32_t*):
  * returned = -1, argument 1 after call = 19, argument 2 after call = 0
  * ec_sys_get_fan_pwm(20, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 20, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 20, argument 2 after call = 100
  * ec_sys_get_fan_pwm(21, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 21, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 21, argument 2 after call = 100
  * ec_sys_get_fan_pwm(22, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 22, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 22, argument 2 after call = 100
  * ec_sys_get_fan_pwm(23, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 23, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 23, argument 2 after call = 100
  * ec_sys_get_fan_pwm(24, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 24, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 24, argument 2 after call = 100
  * ec_sys_get_fan_pwm(25, 0) called as int8_t function(uint8_t, uint32_t*):
- * returned = 0, argument 1 after call = 25, argument 2 after call = 76
+ * returned = 0, argument 1 after call = 25, argument 2 after call = 100
  * ec_sys_get_fan_pwm(26, 0) called as int8_t function(uint8_t, uint32_t*):
  * returned = -1, argument 1 after call = 26, argument 2 after call = 0
  * ec_sys_get_fan_pwm(27, 0) called as int8_t function(uint8_t, uint32_t*):
@@ -436,9 +436,11 @@ int8_t ec_sys_get_fan_pwm(uint8_t channel, uint32_t* pwm)
     case 3:
     case 4:
     case 5:
+      *pwm = 80;
+      return 0;
     case 6:
     case 7:
-      *pwm = 75;
+      *pwm = 90;
       return 0;
     case 20:
     case 21:
@@ -446,7 +448,7 @@ int8_t ec_sys_get_fan_pwm(uint8_t channel, uint32_t* pwm)
     case 23:
     case 24:
     case 25:
-      *pwm = 75;
+      *pwm = 100;
       return 0;
     case 30:
     case 31:

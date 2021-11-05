@@ -24,7 +24,7 @@
 #include <linux/slab.h>
 #include "qnap-ec-ioctl.h"
 
-// Define the printk prefix
+// Define the pr_err prefix
 #undef pr_fmt
 #define pr_fmt(fmt) "%s @ %s: " fmt, "qnap-ec", __FUNCTION__
 
@@ -833,6 +833,20 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
+  // Check if the fan PWM didn't actually change
+  /*
+  if (initial_fan_pwms[channel] == changed_fan_pwms[channel])
+  {
+    // Mark this channel as checked (and invalid by default)
+    data->pwm_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
+
+    // Release the data mutex lock
+    mutex_unlock(&data->mutex);
+
+    return false;
+  }
+  */
+
   // Set the fan PWM to the initial fan PWM and call the ec_sys_set_fan_speed function in the
   //   libuLinux_hal library
   fan_pwm = initial_fan_pwms[channel];
@@ -858,6 +872,7 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
     // Check if this channel does not have the same intial fan PWM as the channel being validated
     if (initial_fan_pwms[i] != initial_fan_pwms[channel])
       continue;
+
 
     // Check if this channel does not have the same changed fan PWM as the channel being validated
     if (changed_fan_pwms[i] != changed_fan_pwms[channel])
@@ -910,11 +925,11 @@ static int qnap_ec_is_pwm_channel_valid_read_fan_pwms(struct qnap_ec_data* data,
     if (changed_fan_pwms != NULL && initial_fan_pwms[j] != initial_fan_pwms[channel])
       continue;
 
-    // Set the fan PWM to a predictable value and call the ec_sys_get_fan_pwm function in the
-    //   libuLinux_hal library
-    fan_pwm = 0;
+    // Set the fan PWM to an invalid value (to verify that the called function changed the value)
+    //   and call the ec_sys_get_fan_pwm function in the libuLinux_hal library
+    fan_pwm = 256;
     if (qnap_ec_call_lib_function(false, data, int8_func_uint8_uint32pointer, "ec_sys_get_fan_pwm",
-        channel, NULL, &fan_pwm, NULL, false) != 0)
+        j, NULL, &fan_pwm, NULL, false) != 0)
     {
       // Check if this is the channel that is being validated and we should return instead of
       //   continuing in the loop
@@ -1071,12 +1086,11 @@ static int qnap_ec_call_lib_function(bool use_mutex, struct qnap_ec_data* data,
   {
     // Log the error
 #ifdef PACKAGE
-    printk(KERN_ERR "qnap-ec helper program not found at the expected path (%s) or any of the "
-      "fall back paths (%s, %s, %s)", paths[0], paths[1], paths[2], paths[3]);
+    pr_err("qnap-ec helper program not found at the expected path (%s) or any of the fall back "
+      "paths (%s, %s, %s)", paths[0], paths[1], paths[2], paths[3]);
 #else
-    printk(KERN_ERR "qnap-ec helper program not found at the expected path (%s) or any of the "
-      "fall back paths (%s, %s, %s, %s, %s)", paths[0], paths[1], paths[2], paths[3], paths[4],
-      paths[5]);
+    pr_err("qnap-ec helper program not found at the expected path (%s) or any of the fall back "
+      "paths (%s, %s, %s, %s, %s)", paths[0], paths[1], paths[2], paths[3], paths[4], paths[5]);
 #endif
 
     // Clear the open device flag
@@ -1097,7 +1111,7 @@ static int qnap_ec_call_lib_function(bool use_mutex, struct qnap_ec_data* data,
     // Log the error
     // Note: the sign (+/-) of the user space helper program's error code is not returned by the
     //       call_usermodehelper function
-    printk(KERN_ERR "qnap-ec helper program exited with a non zero exit code (+/-%i)",
+    pr_err("qnap-ec helper program exited with a non zero exit code (+/-%i)",
       ((return_value >> 8) & 0xFF));
 
     // Clear the open device flag
@@ -1119,8 +1133,8 @@ static int qnap_ec_call_lib_function(bool use_mutex, struct qnap_ec_data* data,
   {
     // Check if we should log the function return error code error and log the error
     if (log_return_error)
-      printk(KERN_ERR "libuLinux_hal library %s function called by qnap-ec helper program returned "
-        "a non zero value (%i)", data->ioctl_command.function_name,
+      pr_err("libuLinux_hal library %s function called by qnap-ec helper program returned a non "
+        "zero value (%i)", data->ioctl_command.function_name,
         data->ioctl_command.return_value_int8);
 
     // Check if we are using the mutex and release the data mutex lock
