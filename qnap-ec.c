@@ -731,9 +731,9 @@ static bool qnap_ec_is_fan_channel_valid(struct qnap_ec_data* data, uint8_t chan
     return false;
   }
 
-  // Mark this channel as valid and checked
-  data->fan_channel_valid_field[channel / 8] |= (0x01 << (channel % 8));
+  // Mark this channel as checked and valid
   data->fan_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
+  data->fan_channel_valid_field[channel / 8] |= (0x01 << (channel % 8));
 
   // Release the data mutex lock
   mutex_unlock(&data->mutex);
@@ -768,6 +768,7 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
   // Declare and/or define needed variables
   uint8_t i;
   uint8_t fan_pwm;
+  uint32_t fan_speed;
   bool valid_channel_marked = false;
   uint8_t initial_fan_pwms[QNAP_EC_NUMBER_OF_PWM_CHANNELS];
   uint8_t changed_fan_pwms[QNAP_EC_NUMBER_OF_PWM_CHANNELS];
@@ -876,18 +877,29 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
     if (changed_fan_pwms[i] != changed_fan_pwms[channel])
       continue;
 
+    // Mark this channel as checked
+    data->pwm_channel_checked_field[i / 8] |= (0x01 << (i % 8));
+
     // Check if a valid channel has not yet been marked in this group
     if (!valid_channel_marked)
     {
+      // Set the fan speed to an invalid value (to verify that the called function changed the
+      //   value) and call the ec_sys_get_fan_speed function in the libu_Linux_hal library
+      fan_speed = 65535;
+      if (qnap_ec_call_lib_function(false, data, int8_func_uint8_uint32pointer,
+          "ec_sys_get_fan_speed", i, NULL, &fan_speed, NULL, false) != 0)
+        continue;
+
+      // Check if the returned fan speed is 65535
+      if (fan_speed == 65535)
+        continue;
+
       // Mark this channel as valid
       data->pwm_channel_valid_field[i / 8] |= (0x01 << (i % 8));
 
       // Set the marked flag
       valid_channel_marked = true;
     }
-
-    // Mark this channel as checked
-    data->pwm_channel_checked_field[i / 8] |= (0x01 << (i % 8));
   }
 
   // Release the data mutex lock
@@ -1017,9 +1029,9 @@ static bool qnap_ec_is_temp_channel_valid(struct qnap_ec_data* data, uint8_t cha
     return false;
   }
 
-  // Mark this channel as valid and checked
-  data->temp_channel_valid_field[channel / 8] |= (0x01 << (channel % 8));
+  // Mark this channel as checked and valid
   data->temp_channel_checked_field[channel / 8] |= (0x01 << (channel % 8));
+  data->temp_channel_valid_field[channel / 8] |= (0x01 << (channel % 8));
 
   // Release the data mutex lock
   mutex_unlock(&data->mutex);
