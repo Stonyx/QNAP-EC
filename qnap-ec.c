@@ -834,7 +834,6 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
   }
 
   // Check if the fan PWM didn't actually change
-  /*
   if (initial_fan_pwms[channel] == changed_fan_pwms[channel])
   {
     // Mark this channel as checked (and invalid by default)
@@ -845,7 +844,6 @@ static bool qnap_ec_is_pwm_channel_valid(struct qnap_ec_data* data, uint8_t chan
 
     return false;
   }
-  */
 
   // Set the fan PWM to the initial fan PWM and call the ec_sys_set_fan_speed function in the
   //   libuLinux_hal library
