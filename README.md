@@ -46,3 +46,4 @@ If you would like to create a package containing this driver run the following c
 ```
 sudo make package DESTDIR=full_path_to_package_staging_location
 ```
+You can also add `DEBIAN=yes` or `SLACKWARE=yes` to the package command to copy the package describing `control` or `slack-desc` files to the staging location.
