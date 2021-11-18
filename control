@@ -1,0 +1,8 @@
+Package: QNAP-EC
+Version: 1.1.0
+Architecture: amd64
+Maintainer: Stonyx <info@stonyx.com>
+Description: QNAP-EC - HWMon Driver for QNAP IT8528 E.C. Chips
+ A Linux hwmon driver kernel module for the QNAP IT8528 Embedded Controller
+ chip (and possibly others).
+Homepage: https://github.com/Stonyx/QNAP-EC
