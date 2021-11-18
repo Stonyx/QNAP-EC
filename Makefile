@@ -29,6 +29,8 @@ MODULE_BINARY_FILE := qnap-ec.ko
 MODULE_PATH := /lib/modules/$(shell uname -r)/extra
 SIM_LIB_C_FILE := libuLinux_hal-simulated.c
 SIM_LIB_BINARY_FILE := libuLinux_hal.so
+CONTROL_FILE := control
+CONTROL_PATH := /DEBIAN
 SLACK_DESC_FILE := slack-desc
 SLACK_DESC_PATH := /install
 DEPMOD_COMMAND := $(shell which depmod)
@@ -55,7 +57,7 @@ ifndef KERNELRELEASE
   PWD := $(shell pwd)
   package : MODULE_CFLAGS := -DPACKAGE
 else
-	# Set the module object filename
+  # Set the module object filename
   obj-m := $(MODULE_O_FILE)
 
   # Set the module compiler flags using any passed in flags from the first run through this make
@@ -96,6 +98,10 @@ package: clean helper module
 	$(INSTALL_COMMAND) --strip --owner=root --group=root --mode=755 -D $(HELPER_BINARY_FILE) \
 	  $(DESTDIR)$(HELPER_PACKAGED_PATH)/$(HELPER_BINARY_FILE)
 	$(MAKE) -C $(KDIR) M=$(PWD) INSTALL_MOD_PATH=$(DESTDIR) modules_install
+ifdef DEBIAN
+	$(INSTALL_COMMAND) --owner=root --group=root --mode=644 -D $(CONTROL_FILE) \
+		$(DESTDIR)$(CONTROL_PATH)/$(CONTROL_FILE)
+endif
 ifdef SLACKWARE
 	$(INSTALL_COMMAND) --owner=root --group=root --mode=644 -D $(SLACK_DESC_FILE) \
 	  $(DESTDIR)$(SLACK_DESC_PATH)/$(SLACK_DESC_FILE)
