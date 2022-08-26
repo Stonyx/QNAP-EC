@@ -30,7 +30,7 @@
 
 // Define module details
 MODULE_DESCRIPTION("QNAP EC Driver");
-MODULE_VERSION("1.1.1");
+MODULE_VERSION("1.1.2");
 MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
 MODULE_PARM_DESC(val_pwm_channels, "Validate PWM channels");

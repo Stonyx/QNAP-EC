@@ -216,7 +216,7 @@ int8_t Ini_Conf_Get_Field_Int(char* file, char* section, char* field, int32_t* v
   uint32_t length)
 {
   // Check if the file, section, and field values are not what we expect
-  if (strcmp(file, "/etc/model.conf") || strcmp(section, "System IO") ||
+  if (strcmp(file, "/etc/model.conf") || strcmp(section, "System Enclosure") ||
     strcmp(field, "MAX_CPU_FAN_NUM"))
   {
     syslog(LOG_ERR, "unexpected call to simulated Ini_Conf_Get_Field_Int function with %s, %s, "
