@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Stonyx
+ * Copyright (C) 2021-2022 Stonyx
  * https://www.stonyx.com/
  *
  * This program is free software. You can redistribute it and/or modify it under the terms of the

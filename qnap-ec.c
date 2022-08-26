@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 Stonyx
+ * Copyright (C) 2021-2022 Stonyx
  * https://www.stonyx.com/
  *
  * This driver is free software. You can redistribute it and/or modify it under the terms of the
@@ -30,7 +30,7 @@
 
 // Define module details
 MODULE_DESCRIPTION("QNAP EC Driver");
-MODULE_VERSION("1.1.0");
+MODULE_VERSION("1.1.1");
 MODULE_AUTHOR("Stonyx - https://www.stonyx.com/");
 MODULE_LICENSE("GPL");
 MODULE_PARM_DESC(val_pwm_channels, "Validate PWM channels");
