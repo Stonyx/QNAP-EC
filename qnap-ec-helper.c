@@ -158,15 +158,9 @@ int main(int argc, char** argv)
         exit(EXIT_FAILURE);
       }
 
-      syslog(LOG_INFO, "calling %s function with %i and %i arguments", ioctl_command.function_name,
-        ioctl_command.argument1_uint8, ioctl_command.argument2_uint8);
-
       // Call the library function
       ioctl_command.return_value_int8 = int8_function_uint8_uint8(ioctl_command.argument1_uint8,
         ioctl_command.argument2_uint8);
-
-      syslog(LOG_INFO, "function %s returned %i", ioctl_command.function_name, 
-        ioctl_command.return_value_int8);
 
       break;
     default:
@@ -205,7 +199,8 @@ int8_t Ini_Conf_Get_Field(char* file, char* section, char* field, char* value, u
   if (strcmp(file, "/etc/model.conf") || strcmp(section, "System IO") ||
     strcmp(field, "REDUNDANT_POWER_INFO"))
   {
-    syslog(LOG_ERR, "unexpected call to simulated Ini_Conf_Get_Field function");
+    syslog(LOG_ERR, "unexpected call to simulated Ini_Conf_Get_Field function with %s, %s, "
+      "and %s arguments", file, section, field);
     return -1;
   }
 
@@ -224,7 +219,8 @@ int8_t Ini_Conf_Get_Field_Int(char* file, char* section, char* field, int32_t* v
   if (strcmp(file, "/etc/model.conf") || strcmp(section, "System IO") ||
     strcmp(field, "MAX_CPU_FAN_NUM"))
   {
-    syslog(LOG_ERR, "unexpected call to simulated Ini_Conf_Get_Field_Int function");
+    syslog(LOG_ERR, "unexpected call to simulated Ini_Conf_Get_Field_Int function with %s, %s, "
+      "and %s arguments", file, section, field);
     return -1;
   }
 
